@@ -8,7 +8,7 @@
   <entry>
     <title>{{ book.title }}</title>
     <id>ORCA:Books:{{ book.id }}</id>
-    <link href="http://192.168.178.38:8080/book/{{ book.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link href="{{ base_url }}/book/{{ book.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">{{ book.title }}</content>
   </entry>
   {% endfor %}

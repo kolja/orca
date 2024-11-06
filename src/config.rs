@@ -1,31 +1,31 @@
 
 use std::sync::{RwLock, RwLockReadGuard};
 use std::fs;
-use serde_derive::Deserialize;
+use serde_derive::{Serialize, Deserialize};
 use toml;
 
 use std::process::exit;
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     pub server: Server,
     pub authentication: Authentication,
     pub calibre: Calibre,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Server {
     pub ip: String,
     pub port: u16,
     pub templates: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Authentication {
     pub credentials: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Calibre {
     pub db_path: String,
 }

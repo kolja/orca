@@ -17,6 +17,7 @@ use calibre::tags::Entity as Tag;
 #[derive(Clone)]
 struct AppState {
     templates: tera::Tera,
+    config: config::Config,
     db: Arc<DatabaseConnection>,
 }
 
@@ -43,9 +44,12 @@ fn authorized(req: HttpRequest) -> Option<String> {
 #[actix_web::get("/opds")]
 async fn opds(data: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse, Error> {
     let template = &data.templates;
-    let ctx = tera::Context::new();
+    let mut ctx = tera::Context::new();
     match authorized(req) {
         Some(_credentials) => {
+
+            ctx.insert("config", &data.config);
+            ctx.insert("base_url", &format!("http://{}:{}", &data.config.server.ip , &data.config.server.port));
 
             match template.render("index.xml.tera", &ctx) {
                 Ok(body) => Ok(HttpResponse::Ok()
@@ -71,12 +75,12 @@ async fn tags(data: web::Data<AppState>, req: HttpRequest) -> Result<HttpRespons
     let template = &data.templates;
     let mut ctx = tera::Context::new();
     match authorized(req) {
-        Some(credentials) => {
+        Some(_credentials) => {
+
+            ctx.insert("config", &data.config);
+            ctx.insert("base_url", &format!("http://{}:{}", &data.config.server.ip , &data.config.server.port));
 
             let db = &*data.db;
-            println!("Authorized: {}", credentials);
-            println!("db: {:?}", data.db);
-
             let tags: Vec<calibre::tags::Model> = Tag::find().all(db).await.unwrap();
             ctx.insert("tags", &tags);
 
@@ -112,6 +116,7 @@ async fn main() -> std::io::Result<()> {
 
     let state = AppState {
         templates,
+        config: config.clone(),
         db: Arc::new(db),
     };
 

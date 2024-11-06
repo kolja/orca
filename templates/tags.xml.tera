@@ -1,0 +1,17 @@
+
+{% extends "layout.xml.tera" %}
+{% block content %}
+
+  <title>Tags</title>
+
+  {% for tag in tags %}
+  <entry>
+    <title>{{ tag.name }}</title>
+    <updated>2023-10-30T19:20:30Z</updated>
+    <id>ORCA:Tags{{ tag.id }}</id>
+    <link href="http://192.168.178.38:8080/by-tag/{{ tag.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <content type="text">Books tagged {{ tag.name }}</content>
+  </entry>
+  {% endfor %}
+
+{% endblock content %}

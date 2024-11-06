@@ -1,0 +1,11 @@
+
+[server]
+ip = "192.168.178.38"
+port = 8080
+templates = "/Users/kolja/dev/orca/templates"
+
+[authentication]
+credentials = [ "kolja:abc", "LinSue:def" ]
+
+[calibre]
+db_path = "/Volumes/library/metadata.db"

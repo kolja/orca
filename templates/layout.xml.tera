@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
+  <updated>2023-10-30T19:20:30Z</updated>
+  <author> <name>Kolja</name> </author>
+  <id>ORCA</id>
+  <link rel="self" href="http://192.168.178.38:8080/opds" />
+  {% block content %}{% endblock content %}
+</feed>
+

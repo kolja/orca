@@ -27,7 +27,7 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub uuid: Option<String>,
     #[sea_orm(column_type = "custom(\"BOOL\")", nullable)]
-    pub has_cover: Option<String>,
+    pub has_cover: bool,
     pub last_modified: DateTimeUtc,
 }
 

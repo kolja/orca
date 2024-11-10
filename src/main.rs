@@ -1,105 +1,79 @@
-use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer, Error, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use authorized::Authorized;
+use calibre::tags::Entity as Tag;
+use sea_orm::{Database, DatabaseConnection, EntityTrait};
 use std::sync::Arc;
 use tera::Tera;
-// use std::process::exit;
 
 #[macro_use]
 extern crate lazy_static;
 
+mod appstate;
+mod authorized;
 mod calibre;
 mod config;
 
-use sea_orm::{Database, DatabaseConnection, EntityTrait};
-
-use calibre::tags::Entity as Tag;
-
-#[derive(Clone)]
-struct AppState {
-    templates: tera::Tera,
-    config: config::Config,
-    db: Arc<DatabaseConnection>,
-}
-
-fn authorized(req: HttpRequest) -> Option<String> {
-    let credentials = req
-        .headers()
-        .get("authorization")
-        .and_then(|s| s.to_str().ok()?.strip_prefix("Basic "))
-        .and_then(|s| BASE64.decode(s).ok())
-        .and_then(|vec| String::from_utf8(vec).ok())?;
-
-    // at this point we have the credentials in the form of "username:password"
-    // and we could do some propper OAuth2 validation.
-
-    let config = config::get();
-
-    if config.authentication.credentials.contains(&credentials) {
-        Some(credentials)
-    } else {
-        None
-    }
-}
+use crate::appstate::AppState;
 
 #[actix_web::get("/opds")]
-async fn opds(data: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse, Error> {
+async fn opds(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -> impl Responder {
     let template = &data.templates;
     let mut ctx = tera::Context::new();
-    match authorized(req) {
-        Some(_credentials) => {
 
-            ctx.insert("config", &data.config);
-            ctx.insert("base_url", &format!("http://{}:{}", &data.config.server.ip , &data.config.server.port));
+    ctx.insert("config", &data.config);
+    ctx.insert(
+        "base_url",
+        &format!(
+            "http://{}:{}",
+            &data.config.server.ip, &data.config.server.port
+        ),
+    );
 
-            match template.render("index.xml.tera", &ctx) {
-                Ok(body) => Ok(HttpResponse::Ok()
-                    .content_type("application/atom+xml")
-                    .body(body)),
-                Err(e) => {
-                    eprintln!("Template rendering error: {}", e);
-                    Ok(HttpResponse::InternalServerError()
-                        .content_type("application/atom+xml")
-                        .body("Template rendering error"))
-                }
-            }
-
-        },
-        None => Ok(HttpResponse::Unauthorized()
-            .insert_header(("WWW-Authenticate", "Basic realm=\"Login Required\""))
-            .body("Unauthorized")),
+    match template.render("index.xml.tera", &ctx) {
+        Ok(body) => Ok::<_, Error>(
+            HttpResponse::Ok()
+                .content_type("application/atom+xml")
+                .body(body),
+        ),
+        Err(e) => {
+            eprintln!("Template rendering error: {}", e);
+            Ok(HttpResponse::InternalServerError()
+                .content_type("application/atom+xml")
+                .body("Template rendering error"))
+        }
     }
 }
 
 #[actix_web::get("/tags")]
-async fn tags(data: web::Data<AppState>, req: HttpRequest) -> Result<HttpResponse, Error> {
+async fn tags(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -> impl Responder {
     let template = &data.templates;
     let mut ctx = tera::Context::new();
-    match authorized(req) {
-        Some(_credentials) => {
 
-            ctx.insert("config", &data.config);
-            ctx.insert("base_url", &format!("http://{}:{}", &data.config.server.ip , &data.config.server.port));
+    ctx.insert("config", &data.config);
+    ctx.insert(
+        "base_url",
+        &format!(
+            "http://{}:{}",
+            &data.config.server.ip, &data.config.server.port
+        ),
+    );
 
-            let db = &*data.db;
-            let tags: Vec<calibre::tags::Model> = Tag::find().all(db).await.unwrap();
-            ctx.insert("tags", &tags);
+    let db = &*data.db;
+    let tags: Vec<calibre::tags::Model> = Tag::find().all(db).await.unwrap();
+    ctx.insert("tags", &tags);
 
-            match template.render("tags.xml.tera", &ctx) {
-                Ok(body) => Ok(HttpResponse::Ok()
-                    .content_type("application/atom+xml")
-                    .body(body)),
-                Err(e) => {
-                    eprintln!("Template rendering error: {}", e);
-                    Ok(HttpResponse::InternalServerError()
-                        .content_type("application/atom+xml")
-                        .body("Template rendering error"))
-                }
-            }
-
-        },
-        None => Ok(HttpResponse::Unauthorized()
-            .insert_header(("WWW-Authenticate", "Basic realm=\"Login Required\""))
-            .body("Unauthorized")),
+    match template.render("tags.xml.tera", &ctx) {
+        Ok(body) => Ok::<_, Error>(
+            HttpResponse::Ok()
+                .content_type("application/atom+xml")
+                .body(body),
+        ),
+        Err(e) => {
+            eprintln!("Template rendering error: {}", e);
+            Ok(HttpResponse::InternalServerError()
+                .content_type("application/atom+xml")
+                .body("Template rendering error"))
+        }
     }
 }
 
@@ -122,14 +96,14 @@ async fn main() -> std::io::Result<()> {
 
     println!("Starting server on {ip}:{port}");
 
-    HttpServer::new(move ||
+    HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(state.clone()))
             .configure(init)
-        )
-        .bind((ip, port))?
-        .run()
-        .await
+    })
+    .bind((ip, port))?
+    .run()
+    .await
 }
 
 fn init(cfg: &mut web::ServiceConfig) {

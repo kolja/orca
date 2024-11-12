@@ -1,10 +1,10 @@
 use crate::config;
-use crate::DatabaseConnection;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use rusqlite::Connection;
 
 #[derive(Clone)]
 pub struct AppState {
     pub templates: tera::Tera,
     pub config: config::Config,
-    pub db: Arc<DatabaseConnection>,
+    pub db: Arc<Mutex<Connection>>,
 }

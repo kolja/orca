@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 tokio = "1.41.0"
 actix-web = "4"
+actix-files = "0.6"
 env_logger = "0.11"
 futures = "0.3"
 base64 = "0.22"
@@ -15,5 +16,5 @@ toml = "0.8.19"
 serde = "1.0.136"
 serde_derive = "1.0.136"
 lazy_static = "1.5.0"
-sea-orm = { version = "1.1.0", features = [ "sqlx-sqlite", "runtime-tokio-native-tls", "macros" ] }
 tera = "1.20.0"
+rusqlite = { version = "0.32.1", features = ["bundled"] }

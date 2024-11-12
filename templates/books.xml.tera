@@ -2,14 +2,21 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
 
-  <title>Books</title>
+<title>Books | {{ books | length() }}</title>
 
   {% for book in books %}
   <entry>
     <title>{{ book.title }}</title>
-    <id>ORCA:Books:{{ book.id }}</id>
-  <link href="{{ base_url }}/book/{{ book.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <content type="text">{{ book.title }}</content>
+    <id>{{ book.id }}</id>
+    <link href="{{ base_url }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
+    <link href="{{ base_url }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
+  <link href="{{ base_url }}/epub/{{ book.id }}" type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB"/>
+    <content type="text">{{ book.synopsis }}</content>
+    <author>
+      <name>{{ book.author_name }}</name>
+      <uri>{{ base_url }}/author/{{ book.author_id }}</uri>
+    </author>
+  <published>{{ book.pubdate }}</published>
   </entry>
   {% endfor %}
 

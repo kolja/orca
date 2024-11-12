@@ -1,0 +1,7 @@
+{% extends "layout.xml.tera" %}
+{% block content %}
+
+  <title>Template Error</title>
+
+{% endblock content %}
+

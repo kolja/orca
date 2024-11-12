@@ -27,7 +27,7 @@ pub struct Authentication {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Calibre {
-    pub db_path: String,
+    pub library_path: String,
 }
 
 fn read_config(config_file: &str) -> Config {

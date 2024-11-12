@@ -8,4 +8,4 @@ templates = "/Users/kolja/dev/orca/templates"
 credentials = [ "kolja:abc", "LinSue:def" ]
 
 [calibre]
-db_path = "/Volumes/library/metadata.db"
+library_path = "/Volumes/library"

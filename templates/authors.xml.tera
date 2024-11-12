@@ -2,7 +2,7 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
 
-  <title>Authors</title>
+<title>Authors | {{ authors | length() }}</title>
 
   {% for author in authors %}
   <entry>

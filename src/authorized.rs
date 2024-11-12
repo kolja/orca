@@ -12,7 +12,7 @@ use actix_web::{
 
 use std::fmt::{Debug, Display};
 use std::future::{ready, Ready};
-use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 use crate::appstate::AppState;
 
 // Custom error type that implements ResponseError

@@ -8,13 +8,13 @@
   <entry>
     <title>{{ book.title }}</title>
     <id>{{ book.id }}</id>
-    <link href="{{ base_url }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
-    <link href="{{ base_url }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
-  <link href="{{ base_url }}/epub/{{ book.id }}" type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB"/>
+    <link href="/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
+    <link href="/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
+  <link href="/epub/{{ book.id }}" type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB"/>
     <content type="text">{{ book.synopsis }}</content>
     <author>
       <name>{{ book.author_name }}</name>
-      <uri>{{ base_url }}/author/{{ book.author_id }}</uri>
+      <uri>/author/{{ book.author_id }}</uri>
     </author>
   <published>{{ book.pubdate }}</published>
   </entry>

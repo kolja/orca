@@ -6,21 +6,21 @@
   <entry>
     <title>Authors</title>
     <id>ORCA:Menu:Authors</id>
-    <link href="{{ base_url }}/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <link href="/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Authors</content>
   </entry>
 
   <entry>
     <title>Tags</title>
     <id>ORCA:Menu:Tags</id>
-    <link href="{{ base_url }}/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <link href="/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Tags</content>
   </entry>
 
   <entry>
     <title>All Books</title>
     <id>ORCA:Menu:Books</id>
-  <link href="{{ base_url }}/books" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link href="/books" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">All Books (Titles)</content>
   </entry>
 {% endblock content %}

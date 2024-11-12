@@ -2,7 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
   <author> <name>Kolja</name> </author>
   <id>ORCA</id>
-  <link rel="self" href="{{ base_url }}/opds" />
+  <link rel="self" href="http://{{ config.server.ip }}:{{ config.server.port }}/opds" />
   {% block content %}{% endblock content %}
 </feed>
 

@@ -89,13 +89,6 @@ async fn opds(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -
     let mut ctx = tera::Context::new();
 
     ctx.insert("config", &data.config);
-    ctx.insert(
-        "base_url",
-        &format!(
-            "http://{}:{}",
-            &data.config.server.ip, &data.config.server.port
-        ),
-    );
     render_template(&data.templates, "index.xml.tera", ctx)
 }
 
@@ -104,13 +97,6 @@ async fn tags(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -
     let mut ctx = tera::Context::new();
 
     ctx.insert("config", &data.config);
-    ctx.insert(
-        "base_url",
-        &format!(
-            "http://{}:{}",
-            &data.config.server.ip, &data.config.server.port
-        ),
-    );
 
     let db_lock = data.db.lock().unwrap();
 
@@ -139,13 +125,6 @@ async fn tags(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -
 //    let mut ctx = tera::Context::new();
 //
 //    ctx.insert("config", &data.config);
-//    ctx.insert(
-//        "base_url",
-//        &format!(
-//            "http://{}:{}",
-//            &data.config.server.ip, &data.config.server.port
-//        ),
-//    );
 //
 //    let db = &*data.db;
 //
@@ -164,13 +143,6 @@ async fn authors(
     let mut ctx = tera::Context::new();
 
     ctx.insert("config", &data.config);
-    ctx.insert(
-        "base_url",
-        &format!(
-            "http://{}:{}",
-            &data.config.server.ip, &data.config.server.port
-        ),
-    );
 
     let db_lock = data.db.lock().unwrap();
 
@@ -201,13 +173,6 @@ async fn getbooks(
     let mut ctx = tera::Context::new();
 
     ctx.insert("config", &data.config);
-    ctx.insert(
-        "base_url",
-        &format!(
-            "http://{}:{}",
-            &data.config.server.ip, &data.config.server.port
-        ),
-    );
 
     let db_lock = data.db.lock().unwrap();
 

@@ -10,7 +10,9 @@
     <id>{{ book.id }}</id>
     <link href="/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
     <link href="/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
-  <link href="/epub/{{ book.id }}" type="application/epub+zip" rel="http://opds-spec.org/acquisition" title="EPUB"/>
+    {% for format in book.formats %}
+      <link href="/file/{{ book.id }}/{{ format }}" type="{{ format | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format }}"/>
+    {% endfor %}
     <content type="text">{{ book.synopsis }}</content>
     <author>
       <name>{{ book.author_name }}</name>

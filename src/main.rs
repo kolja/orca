@@ -2,10 +2,14 @@ use actix_files as fs;
 use actix_web::http::header::{ContentDisposition, DispositionType};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use authorized::Authorized;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, Row};
 use serde_derive::Serialize;
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use tera::Tera;
+use tera::Result as TeraResult;
+use tera::Value;
+use serde_json::json;
 use html2text::from_read;
 
 #[macro_use]
@@ -42,6 +46,7 @@ struct Tag {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Format {
     EPUB,
     PDF,
@@ -59,6 +64,22 @@ impl Format {
     }
 }
 
+// Tera filter to convert format to mime type
+fn format_to_mime_filter(value: &Value, _: &HashMap<String, Value>) -> TeraResult<Value> {
+    let format_str = value.as_str().ok_or_else(|| {
+        tera::Error::msg("Expected a string as input for format_to_mime")
+    })?;
+
+    let mime_type = match format_str {
+        "epub" => "application/epub+zip",
+        "pdf" => "application/pdf",
+        "mobi" => "application/x-mobipocket-ebook",
+        _ => "application/octet-stream",
+    };
+
+    Ok(json!(mime_type))
+}
+
 fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> impl Responder {
     match template.render(name, &ctx) {
         Ok(body) => Ok::<_, Error>(
@@ -74,6 +95,7 @@ fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> impl Resp
         }
     }
 }
+
 #[actix_web::get("/cover/{id}")]
 async fn cover(
     data: web::Data<AppState>,
@@ -95,6 +117,45 @@ async fn cover(
     let cover_path = format!("{}/{}/cover.jpg", data.config.calibre.library_path, path);
 
     let file = fs::NamedFile::open(&cover_path)
+        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+
+    Ok(file
+        .use_last_modified(true)
+        .set_content_disposition(ContentDisposition {
+            disposition: DispositionType::Attachment,
+            parameters: vec![],
+        }))
+}
+
+#[actix_web::get("/file/{id}/{format}")]
+async fn book_file(
+    data: web::Data<AppState>,
+    path: web::Path<(i32, String)>,
+    _auth: Authorized,
+    _req: HttpRequest,
+) -> Result<fs::NamedFile, Error> {
+    let db_lock = data.db.lock().unwrap();
+    let (id, format) = path.into_inner();
+
+    let mut stmt = db_lock
+        .prepare("SELECT b.path, d.name AS file
+                  FROM books b
+                  LEFT JOIN data d ON b.id = d.book
+                  WHERE b.id = ?1 GROUP BY b.id;")
+        .expect("Error preparing SQL statement");
+
+    let row_mapper = |row: &Row| -> rusqlite::Result<(String, String)> {
+        let path: String = row.get(0)?;
+        let file: String = row.get(1)?;
+        Ok((path, file))
+    };
+
+    let (path, file): (String, String) = stmt.query_row(rusqlite::params![id], row_mapper)
+                                            .expect("Error retrieving file path from database");
+
+    let book_file_path = format!("{}/{}/{}.{}", data.config.calibre.library_path, path, file, format);
+
+    let file = fs::NamedFile::open(&book_file_path)
         .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
 
     Ok(file
@@ -337,7 +398,8 @@ async fn main() -> std::io::Result<()> {
     let templates_path = format!("{}/*", config.server.templates.clone());
     let db_path = format!("{}/metadata.db", config.calibre.library_path);
     let db = Connection::open(db_path).unwrap();
-    let templates = Tera::new(&templates_path).unwrap();
+    let mut templates = Tera::new(&templates_path).unwrap();
+    templates.register_filter("format_to_mime", format_to_mime_filter);
 
     let state = AppState {
         templates,
@@ -362,6 +424,7 @@ fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(tags);
     cfg.service(authors);
     cfg.service(getbooks);
+    cfg.service(book_file);
     cfg.service(cover);
     cfg.service(books_by_tag);
     cfg.service(books_by_author);

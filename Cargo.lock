@@ -1234,6 +1234,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_derive",
+ "serde_json",
  "tera",
  "tokio",
  "toml",

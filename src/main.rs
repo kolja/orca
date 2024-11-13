@@ -6,6 +6,7 @@ use rusqlite::{params, Connection};
 use serde_derive::Serialize;
 use std::sync::{Arc, Mutex};
 use tera::Tera;
+use html2text::from_read;
 
 #[macro_use]
 extern crate lazy_static;
@@ -21,9 +22,11 @@ struct Book {
     id: i32,
     title: String,
     pubdate: String,
-    synopsis: Option<String>,
+    synopsis: String,
     author_id: i32,
     author_name: String,
+    book_file: Option<String>,
+    formats: Vec<Format>,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +39,24 @@ struct Author {
 struct Tag {
     id: i32,
     name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub enum Format {
+    EPUB,
+    PDF,
+    MOBI
+}
+
+impl Format {
+    fn from_str(s: &str) -> Option<Format> {
+        match s.to_lowercase().as_str() {
+            "epub" => Some(Format::EPUB),
+            "pdf" => Some(Format::PDF),
+            "mobi" => Some(Format::MOBI),
+            _ => None,
+        }
+    }
 }
 
 fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> impl Responder {
@@ -118,21 +139,60 @@ async fn tags(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -
     render_template(&data.templates, "tags.xml.tera", ctx)
 }
 
-//#[actix_web::get("/tags/{id}")]
-//async fn books_by_tag(data: web::Data<AppState>, tag_id: web::Path<i32>, _auth: Authorized, _req: HttpRequest) -> impl Responder {
-//
-//    let tag_id = tag_id.into_inner();
-//    let mut ctx = tera::Context::new();
-//
-//    ctx.insert("config", &data.config);
-//
-//    let db = &*data.db;
-//
-//
-//    //let books_by_tag: Vec<calibre::books::Model> = Book::find().all(db).await.unwrap();
-//    ctx.insert("books", &books_by_tag);
-//    render_template(&data.templates, "books.xml.tera", ctx)
-//}
+#[actix_web::get("/tags/{id}")]
+async fn books_by_tag(
+    data: web::Data<AppState>,
+    tag_id: web::Path<i32>,
+    _auth: Authorized,
+    _req: HttpRequest,
+) -> impl Responder {
+    let tag_id = tag_id.into_inner();
+    let mut ctx = tera::Context::new();
+    ctx.insert("config", &data.config);
+
+    let db_lock = data.db.lock().unwrap();
+    let mut stmt = db_lock
+        .prepare(
+            "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id, d.name AS book_file,
+            GROUP_CONCAT(d.format) AS formats
+            FROM books b
+            JOIN books_tags_link bt ON b.id = bt.book
+            JOIN tags t ON bt.tag = t.id
+            JOIN books_authors_link ba ON b.id = ba.book
+            JOIN authors a ON ba.author = a.id
+            LEFT JOIN comments c ON b.id = c.book
+            LEFT JOIN data d ON b.id = d.book
+            WHERE t.id = ?1 GROUP BY b.id;")
+        .expect("Error preparing SQL statement");
+
+    let books_iter = stmt
+        .query_map(params![tag_id], |row| {
+            let synopsis = row.get(3).unwrap_or("".to_string());
+            let synopsis = from_read(synopsis.as_bytes(), 100).unwrap();
+            let format_str = row.get("formats").unwrap_or("".to_string());
+            let formats = format_str
+                .split(',')
+                .filter_map(Format::from_str)
+                .collect();
+            Ok(Book {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                pubdate: row.get(2)?,
+                synopsis,
+                author_name: row.get(4)?,
+                author_id: row.get(5)?,
+                book_file: row.get(6)?,
+                formats
+            })
+        })
+        .expect("Error querying books");
+
+
+    let books_by_tag: Vec<Book> = books_iter.map(|b| b.unwrap()).collect();
+
+    ctx.insert("books", &books_by_tag);
+    render_template(&data.templates, "books.xml.tera", ctx)
+}
 
 #[actix_web::get("/authors")]
 async fn authors(
@@ -150,18 +210,73 @@ async fn authors(
         .prepare("SELECT id, name FROM authors;")
         .expect("Error preparing statement");
 
-    let books_iter = stmt
+    let author_iter = stmt
         .query_map(params![], |row| {
             Ok(Author {
                 id: row.get(0)?,
                 name: row.get(1)?,
             })
         })
-        .expect("Error querying books");
-    let authors: Vec<Author> = books_iter.map(|b| b.unwrap()).collect();
+        .expect("Error querying authors");
+
+    let authors: Vec<Author> = author_iter.map(|b| b.unwrap()).collect();
     ctx.insert("authors", &authors);
 
     render_template(&data.templates, "authors.xml.tera", ctx)
+}
+
+#[actix_web::get("/authors/{id}")]
+async fn books_by_author(
+    data: web::Data<AppState>,
+    author_id: web::Path<i32>,
+    _auth: Authorized,
+    _req: HttpRequest,
+) -> impl Responder {
+    let author_id = author_id.into_inner();
+    let mut ctx = tera::Context::new();
+    ctx.insert("config", &data.config);
+
+    let db_lock = data.db.lock().unwrap();
+    let mut stmt = db_lock
+        .prepare(
+            "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id, d.name AS book_file,
+            GROUP_CONCAT(d.format) AS formats
+            FROM books b
+            JOIN books_tags_link bt ON b.id = bt.book
+            JOIN tags t ON bt.tag = t.id
+            JOIN books_authors_link ba ON b.id = ba.book
+            JOIN authors a ON ba.author = a.id
+            LEFT JOIN comments c ON b.id = c.book
+            LEFT JOIN data d ON b.id = d.book
+            WHERE a.id = ?1 GROUP BY b.id;")
+        .expect("Error preparing SQL statement");
+
+    let books_iter = stmt
+        .query_map(params![author_id], |row| {
+            let synopsis = row.get(3).unwrap_or("".to_string());
+            let synopsis = from_read(synopsis.as_bytes(), 100).unwrap();
+            let format_str = row.get("formats").unwrap_or("".to_string());
+            let formats = format_str
+                .split(',')
+                .filter_map(Format::from_str)
+                .collect();
+            Ok(Book {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                pubdate: row.get(2)?,
+                synopsis,
+                author_name: row.get(4)?,
+                author_id: row.get(5)?,
+                book_file: row.get(6)?,
+                formats,
+            })
+        })
+        .expect("Error querying books");
+
+    let books_by_author: Vec<Book> = books_iter.map(|b| b.unwrap()).collect();
+
+    ctx.insert("books", &books_by_author);
+    render_template(&data.templates, "books.xml.tera", ctx)
 }
 
 #[actix_web::get("/books")]
@@ -177,22 +292,33 @@ async fn getbooks(
     let db_lock = data.db.lock().unwrap();
 
     let mut stmt = db_lock.prepare(
-        "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id
+        "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id, d.name AS book_file,
+        GROUP_CONCAT(d.format) AS formats
         FROM books b
         JOIN books_authors_link ba ON b.id = ba.book
         JOIN authors a ON ba.author = a.id
-        LEFT JOIN comments c ON b.id = c.book"
+        LEFT JOIN comments c ON b.id = c.book
+        LEFT JOIN data d ON b.id = d.book GROUP BY b.id;",
     ).expect("Error preparing statement");
 
     let books_iter = stmt
         .query_map(params![], |row| {
+            let synopsis = row.get(3).unwrap_or("".to_string());
+            let synopsis = from_read(synopsis.as_bytes(), 100).unwrap();
+            let format_str = row.get("formats").unwrap_or("".to_string());
+            let formats = format_str
+                .split(',')
+                .filter_map(Format::from_str)
+                .collect();
             Ok(Book {
                 id: row.get(0)?,
                 title: row.get(1)?,
                 pubdate: row.get(2)?,
-                synopsis: row.get(3)?,
+                synopsis,
                 author_name: row.get(4)?,
                 author_id: row.get(5)?,
+                book_file: row.get(6)?,
+                formats,
             })
         })
         .expect("Error querying books");
@@ -237,5 +363,6 @@ fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(authors);
     cfg.service(getbooks);
     cfg.service(cover);
-    // cfg.service(books_by_tag);
+    cfg.service(books_by_tag);
+    cfg.service(books_by_author);
 }

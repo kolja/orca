@@ -2,13 +2,13 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
 
-<title>Authors | {{ authors | length() }}</title>
+<title>{{ lib }} | {{ authors | length() }} Authors</title>
 
   {% for author in authors %}
   <entry>
     <title>{{ author.name }}</title>
     <id>ORCA:Authors{{ author.id }}</id>
-    <link href="/authors/{{ author.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link href="/{{ lib }}/authors/{{ author.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Books by {{ author.name }}</content>
   </entry>
   {% endfor %}

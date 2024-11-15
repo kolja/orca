@@ -7,5 +7,6 @@ templates = "/Users/kolja/dev/orca/templates"
 [authentication]
 credentials = [ "kolja:abc", "LinSue:def" ]
 
-[calibre]
-library_path = "/Volumes/library"
+[calibre.libraries]
+library = "/Volumes/library"
+nonfiction = "/Volumes/nonfiction"

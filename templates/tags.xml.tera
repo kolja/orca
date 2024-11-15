@@ -2,13 +2,13 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
 
-<title>Tags | {{ tags | length() }}</title>
+<title>{{ lib }} | {{ tags | length() }} tags</title>
 
   {% for tag in tags %}
   <entry>
     <title>{{ tag.name }}</title>
     <id>ORCA:Tags{{ tag.id }}</id>
-    <link href="/tags/{{ tag.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link href="/{{ lib }}/tags/{{ tag.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Books tagged {{ tag.name }}</content>
   </entry>
   {% endfor %}

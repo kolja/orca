@@ -2,16 +2,16 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
 
-<title>Books | {{ books | length() }}</title>
+<title>{{ lib }} | {{ books | length() }} books</title>
 
   {% for book in books %}
   <entry>
     <title>{{ book.title }}</title>
     <id>{{ book.id }}</id>
-    <link href="/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
-    <link href="/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
+  <link href="/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
+  <link href="/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
     {% for format in book.formats %}
-      <link href="/file/{{ book.id }}/{{ format }}" type="{{ format | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format }}"/>
+  <link href="/{{ lib }}/file/{{ book.id }}/{{ format }}" type="{{ format | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format }}"/>
     {% endfor %}
     <content type="text">{{ book.synopsis }}</content>
     <author>

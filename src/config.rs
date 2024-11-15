@@ -1,6 +1,7 @@
 
 use std::sync::{RwLock, RwLockReadGuard};
 use std::fs;
+use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
 use toml;
 
@@ -27,7 +28,7 @@ pub struct Authentication {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Calibre {
-    pub library_path: String,
+    pub libraries: HashMap<String, String>,
 }
 
 fn read_config(config_file: &str) -> Config {
@@ -41,8 +42,8 @@ fn read_config(config_file: &str) -> Config {
 
     let config: Config = match toml::from_str(&contents) {
         Ok(d) => d,
-        Err(_) => {
-            eprintln!("Unable to load data from `{}`", config_file);
+        Err(e) => {
+            eprintln!("Unable to load data from `{}`: {}", config_file, e);
             exit(1);
         }
     };

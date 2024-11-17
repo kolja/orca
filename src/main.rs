@@ -12,9 +12,6 @@ use tera::Result as TeraResult;
 use tera::Tera;
 use tera::Value;
 
-#[macro_use]
-extern crate lazy_static;
-
 mod appstate;
 mod authorized;
 mod config;

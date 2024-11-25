@@ -13,9 +13,18 @@ port = 8080
 templates = "/path/to/templates"
 
 [authentication]
-credentials = [ "bob:password", "alice:secret" ]
+alice = "468a286ae97d67f84b56:94Gxd6BCmgkBAtMEIxjW"
+bob = "9a8692aeabe66ebfa609:iK4ODmrJ6RsD8CYRjcY6"
 
 [calibre.libraries]
 library = "/Volumes/library"
 nonfiction = "/Volumes/nonfiction"
 ```
+
+## Authentication
+
+The server supports basic authentication: You can generate a password hash like so:
+```bash
+orca --hash <login>:<password> # e.g. orca --hash alice:secretpassword
+```
+The server will print the hash which you have to copy to the `[authentication]` section of your config file.

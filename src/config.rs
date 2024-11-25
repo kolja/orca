@@ -15,7 +15,7 @@ use std::process::exit;
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
     pub server: Server,
-    pub authentication: Authentication,
+    pub authentication: HashMap<String, String>,
     pub calibre: Calibre,
 }
 
@@ -24,11 +24,6 @@ pub struct Server {
     pub ip: String,
     pub port: u16,
     pub templates: String,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Authentication {
-    pub credentials: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

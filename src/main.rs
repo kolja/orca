@@ -1,3 +1,5 @@
+
+use clap::Parser;
 use actix_files as fs;
 use actix_web::http::header::{ContentDisposition, DispositionType};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
@@ -15,8 +17,21 @@ use tera::Value;
 mod appstate;
 mod authorized;
 mod config;
+mod hash;
+use hash::LoginData;
 
 use crate::appstate::AppState;
+
+#[derive(Parser, Debug)]
+#[clap(
+    author = "Kolja Wilcke",
+    version = "0.0.1",
+    about = "A simple OPDS server for Calibre libraries"
+)]
+struct Cli {
+    #[arg(long = "hash", value_name = "login:password")]
+    login_password: Option<String>,
+}
 
 #[derive(Debug, Serialize)]
 struct Book {
@@ -445,6 +460,25 @@ async fn getbooks(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    let args = Cli::parse();
+    match args.login_password {
+        Some(login_password) => {
+            match LoginData::new(&login_password) {
+                Ok(data) => {
+                    println!("Add this to the [Authentication] section of your config.toml:");
+                    println!("{} = \"{}:{}\"", data.login, data.hash(), data.salt);
+                    return Ok(());
+                }
+                Err(_) => {
+                    eprintln!("Invalid login or password");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => (),
+    }
+
     let config = config::get();
     let ip = config.server.ip.clone();
     let port = config.server.port.clone();

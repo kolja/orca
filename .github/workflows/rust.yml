@@ -57,7 +57,7 @@ jobs:
           cp target/${{ matrix.target }}/release/orca artifacts/orca-${{ matrix.target }}
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: orca-${{ matrix.target }}
           path: artifacts/orca-${{ matrix.target }}
@@ -67,23 +67,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v4
         with:
           name: orca-x86_64-unknown-linux-musl
           path: dist
 
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v4
         with:
           name: orca-x86_64-apple-darwin
           path: dist
 
-      - uses: actions/download-artifact@v2
+      - uses: actions/download-artifact@v4
         with:
           name: orca-aarch64-apple-darwin
           path: dist
 
       - name: Create release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/orca-x86_64-unknown-linux-musl

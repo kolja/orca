@@ -15,7 +15,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         target:
@@ -26,8 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install rustup target for ${{ matrix.target }}
+        run: rustup target add ${{ matrix.target }}
+
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install musl-tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -55,6 +57,7 @@ jobs:
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.target }}/release/orca artifacts/orca-${{ matrix.target }}
+          cp -r templates artifacts/orca-${{ matrix.target }}/templates
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -65,7 +68,6 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/download-artifact@v4
         with:

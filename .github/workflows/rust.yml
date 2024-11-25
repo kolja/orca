@@ -2,11 +2,11 @@ name: Rust
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   release:
-    types: [ "published" ]
+    types: ["published"]
   workflow_dispatch:
 
 env:
@@ -16,13 +16,17 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
-        target:
-          - x86_64-unknown-linux-musl
-          - x86_64-apple-darwin
-          - aarch64-apple-darwin
+        include:
+          - platform: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
 
     steps:
       - uses: actions/checkout@v4
@@ -30,8 +34,13 @@ jobs:
       - name: Install rustup target for ${{ matrix.target }}
         run: rustup target add ${{ matrix.target }}
 
-      - name: Install system dependencies
+      - name: Install dependencies on Ubuntu
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools libssl-dev pkg-config
+
+      - name: Install dependencies on macOS
+        if: runner.os == 'macOS'
+        run: brew install openssl
 
       - name: Cache cargo registry
         uses: actions/cache@v4

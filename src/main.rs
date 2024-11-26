@@ -25,7 +25,7 @@ use crate::appstate::AppState;
 #[derive(Parser, Debug)]
 #[clap(
     author = "Kolja Wilcke",
-    version = "0.1.5",
+    version = "0.1.6",
     about = "A simple OPDS server for Calibre libraries"
 )]
 struct Cli {

@@ -26,3 +26,5 @@ clap = {version = "*", features = ["derive"]}
 crypto-hash = "0.3.4"
 rand = "0.8.5"
 regex = "1.11.1"
+# for Linux:
+openssl = { version = "0.10", features = ["vendored"] }

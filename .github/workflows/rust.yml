@@ -1,130 +1,46 @@
-name: Rust
+name: Release
+
+permissions:
+  contents: write
 
 on:
   push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
-  release:
-    types: ["published"]
+    tags:
+      - v[0-9]+.*
   workflow_dispatch:
 
-env:
-  CARGO_TERM_COLOR: always
-  OPENSSL_STATIC: 1
-  PKG_CONFIG_PATH: /usr/local/opt/openssl/lib/pkgconfig
-
 jobs:
-  build:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  upload-assets:
+    needs:
+      - create-release
     strategy:
       matrix:
         include:
-          - platform: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - platform: macos-latest
-            target: x86_64-apple-darwin
-          - platform: macos-latest
-            target: aarch64-apple-darwin
-
-    runs-on: ${{ matrix.platform }}
-
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: universal-apple-darwin
+            os: macos-latest
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install rustup target for ${{ matrix.target }}
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Install dependencies on Ubuntu
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools libssl-dev pkg-config
-
-      - name: Install dependencies on macOS
-        if: runner.os == 'macOS'
-        run: brew install openssl
-
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/upload-rust-binary-action@v1
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry
-          restore-keys: |
-            ${{ runner.os }}-cargo-registry
+          bin: orca
+          target: ${{ matrix.target }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/index
-          key: ${{ runner.os }}-cargo-index
-          restore-keys: |
-            ${{ runner.os }}-cargo-index
-
-      - name: Build
-        run: cargo build --target ${{ matrix.target }} --release
-
-      - name: Run tests
-        run: cargo test --target ${{ matrix.target }} --verbose
-
-      - name: Package binaries
-        run: |
-          mkdir -p artifacts
-          cp target/${{ matrix.target }}/release/orca artifacts/orca-${{ matrix.target }}
-          cp -r templates artifacts/orca-${{ matrix.target }}/templates
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: orca-${{ matrix.target }}
-          path: artifacts/orca-${{ matrix.target }}
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: orca-x86_64-unknown-linux-musl
-          path: dist
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: orca-x86_64-apple-darwin
-          path: dist
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: orca-aarch64-apple-darwin
-          path: dist
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist/orca-x86_64-unknown-linux-musl
-            dist/orca-x86_64-apple-darwin
-            dist/orca-aarch64-apple-darwin
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  update_tap:
-    runs-on: ubuntu-latest
-    needs: release
-
-    steps:
-      - name: Checkout Homebrew tap repository
-        uses: actions/checkout@v4
-        with:
-          repository: kolja/homebrew-orca
-          path: homebrew-orca
-
-      - name: Update Homebrew formula
-        run: |
-          LATEST_VERSION=$(git describe --tags)
-          sed -i "s|VERSION = \".*\"|VERSION = \"$LATEST_VERSION\"|g" homebrew-orca/Formula/orca.rb
-          wget -qO- https://github.com/kolja/orca/releases/download/$LATEST_VERSION/orca-x86_64-apple-darwin | sha256sum | cut -d' ' -f1 > homebrew-orca/SHA256_DARWIN_X86
-          wget -qO- https://github.com/kolja/orca/releases/download/$LATEST_VERSION/orca-aarch64-apple-darwin | sha256sum | cut -d' ' -f1 > homebrew-orca/SHA256_DARWIN_ARM
-          wget -qO- https://github.com/kolja/orca/releases/download/$LATEST_VERSION/orca-x86_64-unknown-linux-musl | sha256sum | cut -d' ' -f1 > homebrew-orca/SHA256_LINUX_X86
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add homebrew-orca/Formula/orca.rb
-          git commit -m "Update orca formula to version $LATEST_VERSION"
-          git push

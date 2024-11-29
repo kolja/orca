@@ -28,3 +28,11 @@ The server supports basic authentication: You can generate a password hash like 
 orca --hash <login>:<password> # e.g. orca --hash alice:secretpassword
 ```
 The server will print the hash which you have to copy to the `[authentication]` section of your config file.
+
+## Development
+
+There are a couple of tasks you can run with `cargo make`:
+
+- `cargo make docker-build <image/name>` - Build Docker image and push it to the registry
+- `cargo make git-tag` - Create and push a new git tag. The Version number is read from `Cargo.toml`
+

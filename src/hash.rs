@@ -1,7 +1,6 @@
-
-use crypto_hash::{Algorithm, hex_digest};
-use rand::{thread_rng, Rng};
+use crypto_hash::{hex_digest, Algorithm};
 use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use regex::Regex;
 use std::error::Error;
 use std::fmt;
@@ -48,7 +47,11 @@ impl LoginData {
         let (login, password) = Self::split_by_colon(login_password)?;
         let salt = Self::generate_salt();
 
-        Ok(Self { login, password, salt })
+        Ok(Self {
+            login,
+            password,
+            salt,
+        })
     }
 
     pub fn new_with_salt(login_password: &str, salt: &str) -> Result<Self, LoginDataError> {
@@ -59,7 +62,11 @@ impl LoginData {
 
         let (login, password) = Self::split_by_colon(login_password)?;
 
-        Ok(Self { login, password, salt: salt.to_string() })
+        Ok(Self {
+            login,
+            password,
+            salt: salt.to_string(),
+        })
     }
 
     fn split_by_colon(login_password: &str) -> Result<(String, String), LoginDataError> {
@@ -81,8 +88,10 @@ impl LoginData {
     }
 
     pub fn hash(&self) -> String {
-        hex_digest( Algorithm::SHA256,
-            format!("{}:{}", self.password, self.salt).as_bytes()
-        )[0..20].to_string() // I declare, 20 bytes are enough to avoid collisions
+        hex_digest(
+            Algorithm::SHA256,
+            format!("{}:{}", self.password, self.salt).as_bytes(),
+        )[0..20]
+            .to_string() // I declare, 20 bytes are enough to avoid collisions
     }
 }

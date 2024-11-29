@@ -1,0 +1,18 @@
+[tasks.docker-build]
+description = "Build and push Docker image"
+script = [
+  "./docker/docker-build.sh ${@}"
+]
+
+[tasks.docker-run]
+description = "Run Docker container"
+script = [
+  "./docker/run.sh"
+]
+
+[tasks.git-tag]
+description = "Create a new Git tag"
+script = [
+  "./docker/git-tag.sh"
+]
+

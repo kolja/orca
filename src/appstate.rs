@@ -1,7 +1,7 @@
 use crate::config;
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 use rusqlite::Connection;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
 pub struct AppState {

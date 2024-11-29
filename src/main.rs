@@ -1,9 +1,8 @@
-
-use clap::Parser;
 use actix_files as fs;
 use actix_web::http::header::{ContentDisposition, DispositionType};
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use authorized::Authorized;
+use clap::Parser;
 use html2text::from_read;
 use rusqlite::{params, Connection, Row};
 use serde_derive::Serialize;
@@ -25,7 +24,7 @@ use crate::appstate::AppState;
 #[derive(Parser, Debug)]
 #[clap(
     author = "Kolja Wilcke",
-    version = "0.1.7",
+    version = env!("CARGO_PKG_VERSION"),
     about = "A simple OPDS server for Calibre libraries"
 )]
 struct Cli {
@@ -212,7 +211,6 @@ async fn opds(
     _auth: Authorized,
     _req: HttpRequest,
 ) -> impl Responder {
-
     let mut ctx = tera::Context::new();
     let lib = path.into_inner();
 
@@ -460,22 +458,21 @@ async fn getbooks(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-
     let args = Cli::parse();
     match args.login_password {
-        Some(login_password) => {
-            match LoginData::new(&login_password) {
-                Ok(data) => {
-                    println!("Add this to the [Authentication] section of your config.toml:");
-                    println!("{} = \"{}:{}\"", data.login, data.hash(), data.salt);
-                    return Ok(());
-                }
-                Err(_) => {
-                    eprintln!("Invalid login or password");
-                    std::process::exit(1);
-                }
+        Some(login_password) => match LoginData::new(&login_password) {
+            Ok(data) => {
+                println!("Add this to the [Authentication] section of your config.toml:");
+                println!("{} = \"{}:{}\"", data.login, data.hash(), data.salt);
+                let version = env!("CARGO_PKG_VERSION");
+                print!("{}", version);
+                return Ok(());
             }
-        }
+            Err(_) => {
+                eprintln!("Invalid login or password");
+                std::process::exit(1);
+            }
+        },
         None => (),
     }
 

@@ -1,6 +1,6 @@
 [package]
 name = "orca"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -26,5 +26,6 @@ clap = {version = "*", features = ["derive"]}
 crypto-hash = "0.3.4"
 rand = "0.8.5"
 regex = "1.11.1"
-# for Linux:
+
+[target.'cfg(unix)'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

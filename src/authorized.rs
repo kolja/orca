@@ -1,20 +1,16 @@
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use actix_web::{
-    web,
     dev::Payload,
-    Error,
     error::ResponseError,
-    FromRequest,
-    HttpRequest,
-    HttpResponse,
     http::{header, StatusCode},
+    web, Error, FromRequest, HttpRequest, HttpResponse,
 };
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-use std::fmt::{Debug, Display};
-use std::future::{ready, Ready};
-use serde_derive::{Deserialize, Serialize};
 use crate::appstate::AppState;
 use crate::hash::LoginData;
+use serde_derive::{Deserialize, Serialize};
+use std::fmt::{Debug, Display};
+use std::future::{ready, Ready};
 
 #[derive(Debug)]
 struct UnauthorizedError {
@@ -49,11 +45,11 @@ impl FromRequest for Authorized {
     type Future = Ready<Result<Self, Self::Error>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
-
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         let config = &data.config;
 
-        let result = req.headers()
+        let result = req
+            .headers()
             .get(header::AUTHORIZATION)
             .and_then(|s| s.to_str().ok())
             .and_then(|s| s.strip_prefix("Basic "))
@@ -67,7 +63,9 @@ impl FromRequest for Authorized {
                 match LoginData::new_with_salt(&credentials_string, salt) {
                     Ok(login_data) => {
                         if login_data.hash() == hash {
-                            Some(Authorized { credentials: credentials_string })
+                            Some(Authorized {
+                                credentials: credentials_string,
+                            })
                         } else {
                             None
                         }
@@ -79,7 +77,9 @@ impl FromRequest for Authorized {
         match result {
             Some(auth) => ready(Ok(auth)),
             None => {
-                let error = UnauthorizedError { message: "Unauthorized" };
+                let error = UnauthorizedError {
+                    message: "Unauthorized",
+                };
                 ready(Err(error.into()))
             }
         }

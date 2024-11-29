@@ -10,7 +10,6 @@ If you point the environment variable `ORCA_CONFIG` to a `.toml` file, that's wh
 [server]
 ip = "<your_ip>"
 port = 8080
-templates = "/path/to/templates"
 
 [authentication]
 alice = "468a286ae97d67f84b56:94Gxd6BCmgkBAtMEIxjW"

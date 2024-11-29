@@ -13,6 +13,8 @@ use tera::Result as TeraResult;
 use tera::Tera;
 use tera::Value;
 
+mod templates;
+use templates::Template;
 mod appstate;
 mod authorized;
 mod config;
@@ -495,12 +497,21 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    let templates_path = format!("{}/*", config.server.templates.clone());
-    let mut templates = Tera::new(&templates_path).unwrap();
-    templates.register_filter("format_to_mime", format_to_mime_filter);
+    let mut tera = Tera::default();
+
+    let templates: Vec<(String, String)> = Template::iter()
+        .map(|file| {
+            let content = Template::get(&file).unwrap();
+            let template_str = std::str::from_utf8(content.data.as_ref()).expect("Invalid UTF-8 in template");
+            (file.to_string(), template_str.to_string())
+        })
+        .collect();
+
+    tera.add_raw_templates(templates).expect("Failed to add templates");
+    tera.register_filter("format_to_mime", format_to_mime_filter);
 
     let state = AppState {
-        templates,
+        templates: tera,
         config: config.clone(),
         db: db_map,
     };

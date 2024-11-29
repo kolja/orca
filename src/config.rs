@@ -21,7 +21,6 @@ pub struct Config {
 pub struct Server {
     pub ip: String,
     pub port: u16,
-    pub templates: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

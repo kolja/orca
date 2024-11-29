@@ -134,7 +134,7 @@ async fn cover(
     let cover_path = format!("{}/{}/cover.jpg", library_path, path);
 
     let file = fs::NamedFile::open(&cover_path)
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        .map_err(actix_web::error::ErrorInternalServerError)?;
 
     Ok(file
         .use_last_modified(true)
@@ -184,7 +184,7 @@ async fn book_file(
     let book_file_path = format!("{}/{}/{}.{}", library_path, path, file, format);
 
     let file = fs::NamedFile::open(&book_file_path)
-        .map_err(|e| actix_web::error::ErrorInternalServerError(e))?;
+        .map_err(actix_web::error::ErrorInternalServerError)?;
 
     Ok(file
         .use_last_modified(true)
@@ -458,27 +458,26 @@ async fn getbooks(
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
     let args = Cli::parse();
-    match args.login_password {
-        Some(login_password) => match LoginData::new(&login_password) {
+
+    if let Some(login_password) = args.login_password {
+        match LoginData::new(&login_password) {
             Ok(data) => {
                 println!("Add this to the [Authentication] section of your config.toml:");
                 println!("{} = \"{}:{}\"", data.login, data.hash(), data.salt);
-                let version = env!("CARGO_PKG_VERSION");
-                print!("{}", version);
                 return Ok(());
             }
             Err(_) => {
                 eprintln!("Invalid login or password");
                 std::process::exit(1);
             }
-        },
-        None => (),
+        }
     }
 
     let config = config::get();
-    let ip = config.server.ip.clone();
-    let port = config.server.port.clone();
+    let ip = config.server.ip.as_str();
+    let port = config.server.port;
 
     let mut db_map: HashMap<String, Arc<Mutex<Connection>>> = HashMap::new();
     for (library, path) in &config.calibre.libraries {

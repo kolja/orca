@@ -7,7 +7,6 @@ use std::fs;
 use std::sync::LazyLock;
 use std::sync::{RwLock, RwLockReadGuard};
 use thiserror::Error;
-use toml;
 
 use std::process::exit;
 
@@ -37,7 +36,7 @@ pub enum ConfigError {
 }
 
 fn find_config(paths: Vec<Option<String>>) -> Result<Config, Box<dyn Error>> {
-    let paths: Vec<String> = paths.into_iter().filter_map(|p| p).collect();
+    let paths: Vec<String> = paths.into_iter().flatten().collect();
 
     paths
         .iter()
@@ -88,10 +87,10 @@ static CONFIG: LazyLock<RwLock<Config>> = LazyLock::new(|| {
 
     let configs = vec![conf_from_env, local_conf1, local_conf2];
 
-    return RwLock::new(find_config(configs).unwrap_or_else(|e| {
+    RwLock::new(find_config(configs).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(1);
-    }));
+    }))
 });
 
 pub fn get() -> RwLockReadGuard<'static, Config> {

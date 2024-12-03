@@ -75,7 +75,7 @@ static CONFIG: LazyLock<RwLock<Config>> = LazyLock::new(|| {
     let local_conf1: Option<String> = home_dir().and_then(|path_buf| {
         path_buf
             .to_str()
-            .map(|s| format!("{}/.config/orca.toml", s.to_owned()))
+           .map(|s| format!("{}/.config/orca.toml", s.to_owned()))
     });
 
     let local_conf2: Option<String> = home_dir().and_then(|path_buf| {

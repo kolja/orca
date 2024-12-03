@@ -30,3 +30,13 @@ rust-embed = { version = "8.5.0", features = ["include-exclude"] }
 
 [target.'cfg(unix)'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
+
+[dev-dependencies]
+assert_cmd = "2.0"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+tokio = { version = "1", features = ["full"] }
+quick-xml = "0.37"
+
+[lib]
+name = "orca"
+path = "src/lib.rs"

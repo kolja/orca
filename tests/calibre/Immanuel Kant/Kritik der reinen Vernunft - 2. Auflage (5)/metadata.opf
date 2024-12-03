@@ -1,0 +1,23 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">5</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">33188aea-9595-4bdd-8982-3c7249a5268e</dc:identifier>
+        <dc:title>Kritik der reinen Vernunft - 2. Auflage</dc:title>
+        <dc:creator opf:file-as="Kant, Immanuel" opf:role="aut">Immanuel Kant</dc:creator>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">calibre (7.22.0) [https://calibre-ebook.com]</dc:contributor>
+        <dc:date>1787-11-13T23:00:00+00:00</dc:date>
+        <dc:description>&lt;div&gt;
+&lt;p&gt;Die &lt;span style="font-weight: bold; font-style: italic"&gt;Kritik der reinen Vernunft&lt;/span&gt; (&lt;em&gt;KrV;&lt;/em&gt; im Original &lt;em&gt;Critik der reinen Vernunft&lt;/em&gt;) ist das &lt;a href="https://de.wikipedia.org/wiki/Erkenntnistheorie"&gt;&lt;span style="color: #6cb4ee"&gt;erkenntnistheoretische&lt;/span&gt;&lt;/a&gt; Hauptwerk des &lt;a href="https://de.wikipedia.org/wiki/Philosophie"&gt;&lt;span style="color: #6cb4ee"&gt;Philosophen&lt;/span&gt;&lt;/a&gt; &lt;a href="https://de.wikipedia.org/wiki/Immanuel_Kant"&gt;&lt;span style="color: #6cb4ee"&gt;Immanuel Kant&lt;/span&gt;&lt;/a&gt;, in dem er den Grundriss für seine &lt;a href="https://de.wikipedia.org/wiki/Transzendentalphilosophie"&gt;&lt;span style="color: #6cb4ee"&gt;Transzendentalphilosophie&lt;/span&gt;&lt;/a&gt; liefert. Die &lt;em&gt;KrV&lt;/em&gt; wird als eines der einflussreichsten Werke in der &lt;a href="https://de.wikipedia.org/wiki/Geschichte_der_Philosophie"&gt;&lt;span style="color: #6cb4ee"&gt;Philosophiegeschichte&lt;/span&gt;&lt;/a&gt; betrachtet und kennzeichnet einen Wendepunkt und den Beginn der modernen Philosophie. Kant schrieb die &lt;em&gt;KrV&lt;/em&gt; als erste seiner drei „Kritiken“; es folgten die &lt;a href="https://de.wikipedia.org/wiki/Kritik_der_praktischen_Vernunft"&gt;&lt;em style="color: #6cb4ee"&gt;Kritik der praktischen Vernunft&lt;/em&gt;&lt;/a&gt; und die &lt;a href="https://de.wikipedia.org/wiki/Kritik_der_Urteilskraft"&gt;&lt;em style="color: #6cb4ee"&gt;Kritik der Urteilskraft&lt;/em&gt;&lt;/a&gt;&lt;em&gt;.&lt;/em&gt; An die &lt;em&gt;KrV&lt;/em&gt; schließen zudem die &lt;a href="https://de.wikipedia.org/wiki/Prolegomena_zu_einer_jeden_k%C3%BCnftigen_Metaphysik,_die_als_Wissenschaft_wird_auftreten_k%C3%B6nnen"&gt;&lt;em style="color: #6cb4ee"&gt;Prolegomena&lt;/em&gt;&lt;/a&gt; von 1783 an. &lt;/p&gt;
+&lt;p&gt;Die Kritik der reinen Vernunft erschien in deutscher Sprache in erster Auflage (A) im Jahr 1781 bei &lt;a href="https://de.wikipedia.org/wiki/Johann_Friedrich_Hartknoch"&gt;&lt;span style="color: #6cb4ee"&gt;Johann Friedrich Hartknoch&lt;/span&gt;&lt;/a&gt;. Die hier vorliegende, zweite Auflage, in Abschnitten wesentlich verändert und erweitert, kam 1787 heraus. In den 1790er Jahren erschienen weitere Fassungen, die sich aber nur unwesentlich von der zweiten Auflage unterschieden. &lt;/p&gt;&lt;/div&gt;</dc:description>
+        <dc:publisher>Projekt Gutenberg</dc:publisher>
+        <dc:identifier opf:scheme="URI">https://www.projekt-gutenberg.org/kant/krvb/krvb.html</dc:identifier>
+        <dc:language>deu</dc:language>
+        <dc:subject>philosophy</dc:subject>
+        <meta name="calibre:timestamp" content="2024-11-30T09:53:59.892979+00:00"/>
+        <meta name="calibre:title_sort" content="Kritik der reinen Vernunft - 2. Auflage"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>

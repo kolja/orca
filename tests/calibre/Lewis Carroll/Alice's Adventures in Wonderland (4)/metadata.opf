@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">4</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">8b9f853c-7171-4f09-ba21-7304603a5128</dc:identifier>
+        <dc:title>Alice's Adventures in Wonderland</dc:title>
+        <dc:creator opf:file-as="Carroll, Lewis" opf:role="aut">Lewis Carroll</dc:creator>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">calibre (7.22.0) [https://calibre-ebook.com]</dc:contributor>
+        <dc:date>2008-06-27T00:00:00+00:00</dc:date>
+        <dc:description>&lt;div&gt;
+&lt;p&gt;&lt;a href="https://en.wikipedia.org/wiki/Alice_(Alice%27s_Adventures_in_Wonderland)"&gt;&lt;span style="color: #6cb4ee"&gt;Alice&lt;/span&gt;&lt;/a&gt;, a young girl, sits bored by a riverbank and spots a &lt;a href="https://en.wikipedia.org/wiki/White_Rabbit"&gt;&lt;span style="color: #6cb4ee"&gt;White Rabbit&lt;/span&gt;&lt;/a&gt; with a &lt;a href="https://en.wikipedia.org/wiki/Pocket_watch"&gt;&lt;span style="color: #6cb4ee"&gt;pocket watch&lt;/span&gt;&lt;/a&gt; and &lt;a href="https://en.wikipedia.org/wiki/Waistcoat"&gt;&lt;span style="color: #6cb4ee"&gt;waistcoat&lt;/span&gt;&lt;/a&gt; lamenting that he is late. Surprised, Alice follows him down a rabbit hole, which sends her into a lengthy plummet but to a safe landing.&lt;/p&gt;
+&lt;p&gt; &lt;/p&gt;
+&lt;p&gt;&lt;span style="font-weight: bold; font-style: italic"&gt;Alice's Adventures in Wonderland&lt;/span&gt; (also known as &lt;span style="font-weight: bold; font-style: italic"&gt;Alice in Wonderland&lt;/span&gt;) is an 1865 English &lt;a href="https://en.wikipedia.org/wiki/Children%27s_literature"&gt;&lt;span style="color: #6cb4ee"&gt;children's novel&lt;/span&gt;&lt;/a&gt; by &lt;a href="https://en.wikipedia.org/wiki/Lewis_Carroll"&gt;&lt;span style="color: #6cb4ee"&gt;Lewis Carroll&lt;/span&gt;&lt;/a&gt;, a mathematics &lt;a href="https://en.wikipedia.org/wiki/University_don"&gt;&lt;span style="color: #6cb4ee"&gt;don&lt;/span&gt;&lt;/a&gt; at the &lt;a href="https://en.wikipedia.org/wiki/University_of_Oxford"&gt;&lt;span style="color: #6cb4ee"&gt;University of Oxford&lt;/span&gt;&lt;/a&gt;. It details the story of a girl named &lt;a href="https://en.wikipedia.org/wiki/Alice_(Alice%27s_Adventures_in_Wonderland)"&gt;&lt;span style="color: #6cb4ee"&gt;Alice&lt;/span&gt;&lt;/a&gt; who falls through a rabbit hole into a fantasy world of &lt;a href="https://en.wikipedia.org/wiki/Anthropomorphism"&gt;&lt;span style="color: #6cb4ee"&gt;anthropomorphic&lt;/span&gt;&lt;/a&gt; creatures.&lt;/p&gt;&lt;/div&gt;</dc:description>
+        <dc:publisher>Gutenberg Project</dc:publisher>
+        <dc:language>eng</dc:language>
+        <dc:subject>fiction</dc:subject>
+        <dc:subject>fantasy</dc:subject>
+        <dc:subject>children</dc:subject>
+        <meta name="calibre:timestamp" content="1865-11-30T09:42:08.521000+00:00"/>
+        <meta name="calibre:title_sort" content="Alice's Adventures in Wonderland"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>

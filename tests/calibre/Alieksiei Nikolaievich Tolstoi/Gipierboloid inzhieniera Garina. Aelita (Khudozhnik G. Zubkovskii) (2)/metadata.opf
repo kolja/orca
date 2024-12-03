@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">2</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">f8ab99fa-4f66-4d50-a2ba-1897efc3537c</dc:identifier>
+        <dc:title>Гиперболоид инженера Гарина. Аэлита (Художник Г. Зубковский)</dc:title>
+        <dc:creator opf:file-as="Толстой, Алексей Николаевич" opf:role="aut">Алексей Николаевич Толстой</dc:creator>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">calibre (7.22.0) [https://calibre-ebook.com]</dc:contributor>
+        <dc:date>1958-11-14T23:00:00+00:00</dc:date>
+        <dc:description>Используя свое изобретение, инженер Гарин совершает убийства тысяч людей, взрывает заводы, топит морские суда. Его называют «слугой дьявола» и «сумасшедшим негодяем». Ужаснув человечество, Гарин стремится властвовать над миром. В повести «Аэлита» рассказывается об удивительном путешествии на Марс инженера Лося и бывшего красноармейца Алексея Гусева и об их встрече с прекрасной дочерью правителя планеты.</dc:description>
+        <dc:language>rus</dc:language>
+        <dc:subject>science fiction</dc:subject>
+        <meta name="calibre:timestamp" content="2024-11-30T09:36:22.987297+00:00"/>
+        <meta name="calibre:title_sort" content="Гиперболоид инженера Гарина. Аэлита (Художник Г. Зубковский)"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>

@@ -1,6 +1,11 @@
 
 # ORCA
 
+![latest](https://img.shields.io/github/v/tag/kolja/orca)
+![build](https://github.com/kolja/orca/actions/workflows/rust.yml/badge.svg)
+[![dependency status](https://deps.rs/repo/github/kolja/orca/status.svg?path=%2F)](https://deps.rs/repo/github/kolja/orca?path=%2F)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A simple OPDS Server for Calibre written in Rust
 
 ## Configuration
@@ -35,3 +40,6 @@ There are a couple of tasks you can run with `cargo make`:
 - `cargo make docker-build <image/name>` - Build Docker image and push it to the registry
 - `cargo make git-tag` - Create and push a new git tag. The Version number is read from `Cargo.toml`
 
+## License
+
+MIT

@@ -1,12 +1,13 @@
 use actix_web::{test, App, web, http::StatusCode, http::header};
 use orca::{create_app, init, config};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use std::env::set_var;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 
 #[actix_web::test]
 async fn unauthorized_request() {
-
+    set_var("ORCA_CONFIG", "tests/orca.test.toml");
     let config = config::get().clone();
     let state = create_app(config);
 
@@ -24,6 +25,7 @@ async fn unauthorized_request() {
 
 #[actix_web::test]
 async fn authorized_request() {
+    set_var("ORCA_CONFIG", "tests/orca.test.toml");
     let config = config::get().clone();
     let state = create_app(config);
 
@@ -48,6 +50,7 @@ async fn authorized_request() {
 
 #[actix_web::test]
 async fn list_books() {
+    set_var("ORCA_CONFIG", "tests/orca.test.toml");
     let config = config::get().clone();
     let state = create_app(config);
 

@@ -1,6 +1,7 @@
 use clap::Parser;
+use std::process::exit;
 use orca::config;
-use orca::hash::LoginData;
+use orca::hash::encode_auth_data;
 use orca::{create_app, run_server};
 
 #[derive(Parser, Debug)]
@@ -19,27 +20,15 @@ async fn main() -> std::io::Result<()> {
 
     // if povided: Print the hash of the login:password string and exit
     let args = Cli::parse();
-    if let Some(auth_data) = encode_auth_data(&args) {
-        println!("{}", auth_data);
-        std::process::exit(0);
-    }
+    args.login_password.as_ref()
+        .and_then(|login_password| encode_auth_data(login_password))
+        .map(|auth_data| {
+            println!("{}", auth_data);
+            exit(0);
+        });
 
     let config = config::get();
 
     run_server(create_app(config.clone())).await
-}
-
-fn encode_auth_data(args: &Cli) -> Option<String> {
-    args.login_password.as_ref().and_then(|login_password| {
-        LoginData::new(login_password).ok().map(|data| {
-            format!(
-                "{}\n{} = \"{}:{}\"",
-                "Add this to the [Authentication] section of your config.toml:",
-                data.login,
-                data.hash(),
-                data.salt
-            )
-        })
-    })
 }
 

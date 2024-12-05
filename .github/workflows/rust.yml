@@ -10,7 +10,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  run-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - name: Run cargo test
+        run: cargo test --all --release
+
   create-release:
+    needs: run-tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,17 +33,12 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   upload-assets:
-    needs:
-      - create-release
+    needs: create-release
     strategy:
       matrix:
         include:
-          # - target: x86_64-unknown-linux-gnu
-          #   os: ubuntu-latest
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
-          # - target: x86_64-apple-darwin
-          #   os: macos-latest
           - target: aarch64-apple-darwin
             os: macos-latest
     runs-on: ${{ matrix.os }}
@@ -45,4 +54,3 @@ jobs:
           bin: orca
           target: ${{ matrix.target }}
           token: ${{ secrets.GITHUB_TOKEN }}
-

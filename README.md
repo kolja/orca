@@ -1,4 +1,6 @@
 
+<img src="./orca-logo.svg" alt="an orca whale reading a book" width="200px" height="200px">
+
 # ORCA
 
 ![latest](https://img.shields.io/github/v/tag/kolja/orca)

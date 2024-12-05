@@ -1,8 +1,6 @@
 use clap::Parser;
 use std::process::exit;
-use orca::config;
-use orca::hash::encode_auth_data;
-use orca::{create_app, run_server};
+use orca::{config, create_app, run_server, hash::encode_auth_data};
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -29,6 +27,6 @@ async fn main() -> std::io::Result<()> {
 
     let config = config::get();
 
-    run_server(create_app(config.clone())).await
+    run_server(create_app(&config)).await
 }
 

@@ -1,22 +1,29 @@
-use actix_web::{test, App, web, http::StatusCode, http::header};
-use orca::{create_app, init, config};
+use actix_web::{test, App, web};
+use actix_web::http::{header, StatusCode};
+use actix_web::dev::{Service, ServiceResponse};
+use actix_http::Request;
+use orca::{create_app, init};
+use orca::config::{Config, read_config};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use std::env::set_var;
-use quick_xml::events::Event;
-use quick_xml::reader::Reader;
+use quick_xml::{events::Event, reader::Reader};
+use once_cell::sync::Lazy;
+
+static TEST_CONFIG: Lazy<Config> = Lazy::new(|| {
+    read_config("tests/orca.test.toml").expect("Failed to read test config")
+});
+
+async fn setup() -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
+    let state = create_app(&TEST_CONFIG);
+    test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .configure(init)
+          ).await
+}
 
 #[actix_web::test]
 async fn unauthorized_request() {
-    set_var("ORCA_CONFIG", "tests/orca.test.toml");
-    let config = config::get().clone();
-    let state = create_app(config);
-
-    let app = test::init_service(
-                App::new()
-                    .app_data(web::Data::new(state))
-                    .configure(init)
-              ).await;
-
+    let app = setup().await;
     let req = test::TestRequest::with_uri("/")
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -25,16 +32,7 @@ async fn unauthorized_request() {
 
 #[actix_web::test]
 async fn authorized_request() {
-    set_var("ORCA_CONFIG", "tests/orca.test.toml");
-    let config = config::get().clone();
-    let state = create_app(config);
-
-    let app = test::init_service(
-                App::new()
-                    .app_data(web::Data::new(state))
-                    .configure(init)
-              ).await;
-
+    let app = setup().await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -50,16 +48,7 @@ async fn authorized_request() {
 
 #[actix_web::test]
 async fn list_books() {
-    set_var("ORCA_CONFIG", "tests/orca.test.toml");
-    let config = config::get().clone();
-    let state = create_app(config);
-
-    let app = test::init_service(
-                App::new()
-                    .app_data(web::Data::new(state))
-                    .configure(init)
-              ).await;
-
+    let app = setup().await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/library/books")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -77,7 +66,6 @@ fn is_opds(content: &str) -> bool {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
-
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(ref e)) if e.name().as_ref() == b"feed" => break(true),
@@ -92,7 +80,6 @@ fn count_books(content: &str) -> usize {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
-
     let mut book_count = 0;
     loop {
         match reader.read_event_into(&mut buf) {

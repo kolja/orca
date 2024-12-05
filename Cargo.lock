@@ -1628,6 +1628,7 @@ name = "orca"
 version = "0.1.8"
 dependencies = [
  "actix-files",
+ "actix-http",
  "actix-web",
  "assert_cmd",
  "base64",
@@ -1638,6 +1639,7 @@ dependencies = [
  "futures",
  "html2text",
  "lazy_static",
+ "once_cell",
  "openssl",
  "quick-xml",
  "rand",

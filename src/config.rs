@@ -1,14 +1,8 @@
 use dirs::home_dir;
 use serde_derive::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::env;
-use std::error::Error;
-use std::fs;
-use std::sync::LazyLock;
-use std::sync::{RwLock, RwLockReadGuard};
+use std::{fs, env, error::Error, collections::HashMap, process::exit};
+use once_cell::sync::Lazy;
 use thiserror::Error;
-
-use std::process::exit;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -56,42 +50,40 @@ fn valid_file(config_file: &str) -> bool {
     }
 }
 
-fn read_config(config_file: &str) -> Result<Config, Box<dyn Error>> {
+pub fn read_config(config_file: &str) -> Result<Config, Box<dyn Error>> {
     if !valid_file(config_file) {
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Config file not found",
         )));
     }
-
     let contents = fs::read_to_string(config_file)?;
     let config = toml::from_str(&contents)?;
     Ok(config)
 }
 
-static CONFIG: LazyLock<RwLock<Config>> = LazyLock::new(|| {
+fn load_config() -> Config {
     let conf_from_env: Option<String> = env::var("ORCA_CONFIG").ok();
 
     let local_conf1: Option<String> = home_dir().and_then(|path_buf| {
-        path_buf
-            .to_str()
-           .map(|s| format!("{}/.config/orca.toml", s.to_owned()))
+        path_buf.to_str().map(|s| format!("{}/.config/orca.toml", s.to_owned()))
     });
 
     let local_conf2: Option<String> = home_dir().and_then(|path_buf| {
-        path_buf
-            .to_str()
-            .map(|s| format!("{}/.config/orca/config.toml", s.to_owned()))
+        path_buf.to_str().map(|s| format!("{}/.config/orca/config.toml", s.to_owned()))
     });
 
     let configs = vec![conf_from_env, local_conf1, local_conf2];
 
-    RwLock::new(find_config(configs).unwrap_or_else(|e| {
+    find_config(configs).unwrap_or_else(|e| {
         eprintln!("{}", e);
         exit(1);
-    }))
-});
-
-pub fn get() -> RwLockReadGuard<'static, Config> {
-    CONFIG.read().unwrap()
+    })
 }
+
+static CONFIG: Lazy<Config> = Lazy::new(|| load_config());
+
+pub fn get() -> &'static Config {
+    &CONFIG
+}
+

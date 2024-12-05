@@ -36,7 +36,7 @@ fn format_to_mime_filter(value: &Value, _: &HashMap<String, Value>) -> TeraResul
     Ok(json!(mime_type))
 }
 
-pub fn create_app(config: Config) -> AppState {
+pub fn create_app(config: &'static Config) -> AppState {
 
     let mut db_map: HashMap<String, Arc<Mutex<Connection>>> = HashMap::new();
     for (library, path) in &config.calibre.libraries {

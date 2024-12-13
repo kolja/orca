@@ -13,10 +13,15 @@ A simple OPDS Server for Calibre written in Rust
 ## Configuration
 
 If you point the environment variable `ORCA_CONFIG` to a `.toml` file, that's where the configuration will be read from. Otherwise, it will look for a file named `orca.toml` or `orca/config.toml` in `$HOME/.config/`.
+
+The server will either start as HTTP or HTTPS server depending on the value of 'protocol'. If you set it to 'https', you have to provide a path to a certificate and a key file.
 ```toml
 [server]
 ip = "<your_ip>"
 port = 8080
+protocol = "https" # or "http"
+cert = "/path/to/cert.pem"
+key = "/path/to/key.pem"
 
 [authentication]
 alice = "468a286ae97d67f84b56:94Gxd6BCmgkBAtMEIxjW"

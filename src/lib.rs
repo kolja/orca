@@ -3,6 +3,7 @@ pub mod templates;
 pub mod appstate;
 pub mod authorized;
 pub mod config;
+pub mod tls;
 pub mod hash;
 pub mod routes;
 
@@ -15,7 +16,7 @@ use tera::Result as TeraResult;
 use tera::Tera;
 use tera::Value;
 
-use config::Config;
+use config::{Config, Protocol};
 use templates::Template;
 use routes::{authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, tags};
 use appstate::AppState;
@@ -77,17 +78,36 @@ pub fn create_app(config: &'static Config) -> AppState {
 pub async fn run_server(state: AppState) -> std::io::Result<()> {
     let ip = state.config.server.ip.clone();
     let port = state.config.server.port;
+    let protocol = state.config.server.protocol.clone();
 
-    println!("Starting server on {ip}:{port}");
+    match protocol {
+        Protocol::Http => {
+            println!("Starting HTTP server on {ip}:{port}");
 
-    HttpServer::new(move || {
-        App::new()
-            .app_data(web::Data::new(state.clone()))
-            .configure(init)
-    })
-    .bind((ip, port))?
-    .run()
-    .await
+            HttpServer::new(move || {
+                App::new()
+                    .app_data(web::Data::new(state.clone()))
+                    .configure(init)
+            })
+            .bind((ip, port))?
+            .run()
+            .await
+        }
+        Protocol::Https { cert, key } => {
+            println!("Starting HTTPS server on {ip}:{port}");
+
+            let config = tls::load_rustls_config(cert.as_str(), key.as_str());
+
+            HttpServer::new(move || {
+                App::new()
+                    .app_data(web::Data::new(state.clone()))
+                    .configure(init)
+            })
+            .bind_rustls_0_23((ip, port), config)?
+            .run()
+            .await
+        }
+    }
 }
 
 pub fn init(cfg: &mut web::ServiceConfig) {

@@ -8,12 +8,25 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use quick_xml::{events::Event, reader::Reader};
 use once_cell::sync::Lazy;
 
-static TEST_CONFIG: Lazy<Config> = Lazy::new(|| {
-    read_config("tests/orca.test.toml").expect("Failed to read test config")
+enum Protocol {
+    Http,
+    Https,
+}
+use Protocol::{Http, Https};
+
+static TEST_HTTP_CONFIG: Lazy<Config> = Lazy::new(|| {
+    read_config("tests/orca.http.test.toml").expect("Failed to read test config")
 });
 
-async fn setup() -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
-    let state = create_app(&TEST_CONFIG);
+static TEST_HTTPS_CONFIG: Lazy<Config> = Lazy::new(|| {
+    read_config("tests/orca.https.test.toml").expect("Failed to read test config")
+});
+
+async fn setup(protocol: Protocol) -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
+    let state = match protocol {
+        Http => create_app(&TEST_HTTP_CONFIG),
+        Https => create_app(&TEST_HTTPS_CONFIG),
+    };
     test::init_service(
             App::new()
                 .app_data(web::Data::new(state))
@@ -21,9 +34,11 @@ async fn setup() -> impl Service<Request, Response = ServiceResponse, Error = ac
           ).await
 }
 
+// ------- Http Tests -------
+
 #[actix_web::test]
 async fn unauthorized_request() {
-    let app = setup().await;
+    let app = setup(Http).await;
     let req = test::TestRequest::with_uri("/")
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -32,7 +47,7 @@ async fn unauthorized_request() {
 
 #[actix_web::test]
 async fn authorized_request() {
-    let app = setup().await;
+    let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -48,7 +63,7 @@ async fn authorized_request() {
 
 #[actix_web::test]
 async fn list_books() {
-    let app = setup().await;
+    let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/library/books")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -61,6 +76,35 @@ async fn list_books() {
 
     assert_eq!(count_books(&content), 3);
 }
+
+// ------- Https Tests -------
+
+#[actix_web::test]
+async fn unauthorized_request_https() {
+    let app = setup(Https).await;
+    let req = test::TestRequest::with_uri("/")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[actix_web::test]
+async fn authorized_request_https() {
+    let app = setup(Https).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(is_opds(&content));
+}
+
+// ------- Helper Functions -------
 
 fn is_opds(content: &str) -> bool {
     let mut reader = Reader::from_str(content);
@@ -91,4 +135,3 @@ fn count_books(content: &str) -> usize {
     }
     book_count
 }
-

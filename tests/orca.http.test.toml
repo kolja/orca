@@ -1,0 +1,11 @@
+
+[server]
+ip = "127.0.0.1"
+port = 8888
+protocol = "Http"
+
+[authentication]
+alice = "5935b30f8b030fcaef20:GOwjUGVz54O0FmlicmDb"
+
+[calibre.libraries]
+library = "tests/calibre"

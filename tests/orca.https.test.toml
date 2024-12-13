@@ -1,7 +1,10 @@
 
 [server]
 ip = "127.0.0.1"
-port = 8888
+port = 8443
+protocol = "Https"
+cert = "tests/cert.pem"
+key = "tests/key.pem"
 
 [authentication]
 alice = "5935b30f8b030fcaef20:GOwjUGVz54O0FmlicmDb"

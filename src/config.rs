@@ -12,9 +12,21 @@ pub struct Config {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(tag = "protocol")]
+pub enum Protocol {
+    Http,
+    Https {
+        cert: String,
+        key: String,
+    },
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Server {
     pub ip: String,
     pub port: u16,
+    #[serde(flatten)]
+    pub protocol: Protocol,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

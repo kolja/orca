@@ -38,6 +38,7 @@ reqwest = { version = "0.12", features = ["json", "blocking"] }
 tokio = { version = "1", features = ["full"] }
 quick-xml = "0.37"
 actix-http = "3.9"
+cargo-tarpaulin = "0.31.3"
 
 [lib]
 name = "orca"

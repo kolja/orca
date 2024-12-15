@@ -99,3 +99,84 @@ pub fn get() -> &'static Config {
     &CONFIG
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_file_exists() {
+        assert!(valid_file("tests/orca.http.test.toml"));
+    }
+
+    #[test]
+    fn test_valid_file_not_exists() {
+        assert!(!valid_file("./this.doesnt.exist.toml"));
+    }
+
+    #[test]
+    fn test_read_config_valid() {
+        let config = read_config("tests/orca.http.test.toml");
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.server.ip, "127.0.0.1");
+        assert_eq!(config.server.port, 8888);
+        match config.server.protocol {
+            Protocol::Http => assert!(true),
+            _ => assert!(false, "Expected Http protocol"),
+        }
+    }
+
+    #[test]
+    fn test_read_config_invalid() {
+        let config = read_config("./invalid_config.toml");
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn test_read_config_file_not_found() {
+        let config = read_config("./non_existent_file.toml");
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn test_find_config() {
+        let configs = vec![
+            Some("./non_existent_file.toml".to_string()),
+            Some("tests/orca.http.test.toml".to_string())
+        ];
+        let config = find_config(configs);
+        assert!(config.is_ok());
+        let config = config.unwrap();
+        assert_eq!(config.server.ip, "127.0.0.1");
+        assert_eq!(config.server.port, 8888);
+    }
+
+    #[test]
+    fn test_find_config_not_found() {
+        let configs = vec![
+            Some("./dosnt.exist.toml".to_string()),
+            Some("./dosnt.exist.either.toml".to_string())
+        ];
+        let config = find_config(configs);
+        assert!(config.is_err());
+    }
+
+    #[test]
+    fn test_load_config() {
+        env::set_var("ORCA_CONFIG", "tests/orca.http.test.toml");
+        let config = load_config();
+        assert_eq!(config.server.ip, "127.0.0.1");
+        assert_eq!(config.server.port, 8888);
+        env::remove_var("ORCA_CONFIG");
+    }
+
+    #[test]
+    fn test_get_config() {
+        env::set_var("ORCA_CONFIG", "tests/orca.http.test.toml");
+        let config = get();
+        assert_eq!(config.server.ip, "127.0.0.1");
+        assert_eq!(config.server.port, 8888);
+        env::remove_var("ORCA_CONFIG");
+    }
+}

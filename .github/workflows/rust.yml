@@ -20,12 +20,19 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin
+
       - name: Run cargo test
         run: cargo test --all --release
+
       - name: Test coverage
         run: cargo tarpaulin --out Xml --output-dir ./coverage
+
       - name: Coveralls GitHub Action
         uses: coverallsapp/github-action@v2.3.4
 

@@ -96,7 +96,10 @@ pub async fn run_server(state: AppState) -> std::io::Result<()> {
         Protocol::Https { cert, key } => {
             println!("Starting HTTPS server on {ip}:{port}");
 
-            let config = tls::load_rustls_config(cert.as_str(), key.as_str());
+            let config = tls::load_rustls_config(cert.as_str(), key.as_str()).unwrap_or_else(|e| {
+                eprintln!("Failed to load TLS config: {}", e);
+                std::process::exit(1);
+            });
 
             HttpServer::new(move || {
                 App::new()

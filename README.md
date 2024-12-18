@@ -4,10 +4,10 @@
 # ORCA
 
 ![latest](https://img.shields.io/github/v/tag/kolja/orca)
-![build](https://github.com/kolja/orca/actions/workflows/rust.yml/badge.svg)
+[![build](https://github.com/kolja/orca/actions/workflows/rust.yml/badge.svg)](https://github.com/kolja/orca/actions)
+[![Coverage Status](https://coveralls.io/repos/github/kolja/orca/badge.svg?branch=main)](https://coveralls.io/github/kolja/orca?branch=main)
 [![dependency status](https://deps.rs/repo/github/kolja/orca/status.svg?path=%2F)](https://deps.rs/repo/github/kolja/orca?path=%2F)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Coverage Status](https://coveralls.io/repos/github/kolja/orca/badge.svg?branch=main)](https://coveralls.io/github/kolja/orca?branch=main)
 
 A simple OPDS Server for Calibre written in Rust
 

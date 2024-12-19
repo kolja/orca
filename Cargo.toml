@@ -19,7 +19,6 @@ tera = "1.20.0"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
 html2text = "0.13.3"
 dirs = "5.0.1"
-thiserror = "2.0"
 clap = {version = "*", features = ["derive"]}
 crypto-hash = "0.3.4"
 rand = "0.8.5"

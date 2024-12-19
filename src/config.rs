@@ -1,8 +1,8 @@
 use dirs::home_dir;
 use serde_derive::{Deserialize, Serialize};
-use std::{fs, env, error::Error, collections::HashMap, process::exit};
+use std::{fs, env, collections::HashMap};
 use once_cell::sync::Lazy;
-use thiserror::Error;
+use anyhow::{Context, Error, Result, anyhow};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Config {
@@ -34,13 +34,7 @@ pub struct Calibre {
     pub libraries: HashMap<String, String>,
 }
 
-#[derive(Error, Debug)]
-pub enum ConfigError {
-    #[error("No config file found anywhere. I checked:\n{0}\nin that order")]
-    NotFound(String),
-}
-
-fn find_config(paths: Vec<Option<String>>) -> Result<Config, Box<dyn Error>> {
+fn find_config(paths: Vec<Option<String>>) -> Result<Config, Error> {
     let paths: Vec<String> = paths.into_iter().flatten().collect();
 
     paths
@@ -52,25 +46,19 @@ fn find_config(paths: Vec<Option<String>>) -> Result<Config, Box<dyn Error>> {
             }
             Err(_) => None,
         })
-        .ok_or_else(|| Box::new(ConfigError::NotFound(paths.join("\n"))).into())
+        .with_context(|| format!("No valid config file found in:\n{}", paths.join("\n")))
 }
 
 fn valid_file(config_file: &str) -> bool {
-    match fs::metadata(config_file) {
-        Ok(metadata) => metadata.is_file(),
-        Err(_) => false,
-    }
+    fs::metadata(config_file).is_ok_and(|metadata| metadata.is_file())
 }
 
-pub fn read_config(config_file: &str) -> Result<Config, Box<dyn Error>> {
+pub fn read_config(config_file: &str) -> Result<Config, Error> {
     if !valid_file(config_file) {
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Config file not found",
-        )));
+        return Err(anyhow!("Config file not found"));
     }
     let contents = fs::read_to_string(config_file)?;
-    let config = toml::from_str(&contents)?;
+    let config = toml::from_str(&contents).context(format!("Error parsing toml file {}", config_file))?;
     Ok(config)
 }
 
@@ -88,8 +76,8 @@ fn load_config() -> Config {
     let configs = vec![conf_from_env, local_conf1, local_conf2];
 
     find_config(configs).unwrap_or_else(|e| {
-        eprintln!("{}", e);
-        exit(1);
+        eprintln!("Could not load config: {}", e);
+        std::process::exit(1);
     })
 }
 

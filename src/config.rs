@@ -1,6 +1,6 @@
 use dirs::home_dir;
 use serde_derive::{Deserialize, Serialize};
-use std::{fs, env, collections::HashMap};
+use std::{fs, env, collections::HashMap, fmt};
 use once_cell::sync::Lazy;
 use anyhow::{Context, Error, Result, anyhow};
 
@@ -34,19 +34,45 @@ pub struct Calibre {
     pub libraries: HashMap<String, String>,
 }
 
+#[derive(Debug)]
+struct PathError {
+    path: String,
+    error: Error,
+}
+
+impl fmt::Display for PathError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} : {}", self.path, self.error)
+    }
+}
+
+impl std::error::Error for PathError {}
+
 fn find_config(paths: Vec<Option<String>>) -> Result<Config, Error> {
     let paths: Vec<String> = paths.into_iter().flatten().collect();
+    let mut errors = Vec::new();
 
-    paths
-        .iter()
-        .find_map(|path| match read_config(path) {
+    for path in &paths {
+        match read_config(path) {
             Ok(config) => {
                 println!("Config loaded from: {}", path);
-                Some(config)
+                return Ok(config);
             }
-            Err(_) => None,
-        })
-        .with_context(|| format!("No valid config file found in:\n{}", paths.join("\n")))
+            Err(err) => {
+                errors.push(PathError { path: path.clone(), error: err });
+            }
+        }
+    }
+
+    let error_messages: String = errors.iter()
+        .map(|e| format!("\t{} : {}", e.path, e.error))
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    Err(anyhow!(
+        "No valid config file found:\n{}",
+        error_messages
+    ))
 }
 
 fn valid_file(config_file: &str) -> bool {
@@ -55,14 +81,18 @@ fn valid_file(config_file: &str) -> bool {
 
 pub fn read_config(config_file: &str) -> Result<Config, Error> {
     if !valid_file(config_file) {
-        return Err(anyhow!("Config file not found"));
+        return Err(anyhow!("file not found"));
     }
-    let contents = fs::read_to_string(config_file)?;
-    let config = toml::from_str(&contents).context(format!("Error parsing toml file {}", config_file))?;
+
+    let contents = fs::read_to_string(config_file)
+        .context("failed to read config file")?;
+    let config = toml::from_str(&contents)
+        .map_err(|err| anyhow!(err))?;
     Ok(config)
 }
 
-fn load_config() -> Config {
+static CONFIG: Lazy<Config> = Lazy::new(|| {
+
     let conf_from_env: Option<String> = env::var("ORCA_CONFIG").ok();
 
     let local_conf1: Option<String> = home_dir().and_then(|path_buf| {
@@ -75,96 +105,231 @@ fn load_config() -> Config {
 
     let configs = vec![conf_from_env, local_conf1, local_conf2];
 
-    find_config(configs).unwrap_or_else(|e| {
-        eprintln!("Could not load config: {}", e);
-        std::process::exit(1);
-    })
-}
-
-static CONFIG: Lazy<Config> = Lazy::new(|| load_config());
+    match find_config(configs) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Could not load config: {}", e);
+            std::process::exit(1);
+        }
+    }
+});
 
 pub fn get() -> &'static Config {
     &CONFIG
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::NamedTempFile;
+    use std::io::Write;
 
     #[test]
-    fn test_valid_file_exists() {
-        assert!(valid_file("tests/orca.http.test.toml"));
-    }
+    fn test_valid_config_path() {
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        let valid_toml = r#"
+        [server]
+        ip = "127.0.0.1"
+        port = 8080
+        protocol = "Http"
 
-    #[test]
-    fn test_valid_file_not_exists() {
-        assert!(!valid_file("./this.doesnt.exist.toml"));
-    }
+        [authentication]
+        key = "value"
 
-    #[test]
-    fn test_read_config_valid() {
-        let config = read_config("tests/orca.http.test.toml");
+        [calibre]
+        libraries = {}
+        "#;
+        write!(tmp_file, "{}", valid_toml).unwrap();
+
+        let config = read_config(tmp_file.path().to_str().unwrap());
         assert!(config.is_ok());
-        let config = config.unwrap();
-        assert_eq!(config.server.ip, "127.0.0.1");
-        assert_eq!(config.server.port, 8888);
-        match config.server.protocol {
-            Protocol::Http => assert!(true),
-            _ => assert!(false, "Expected Http protocol"),
+        assert_eq!(config.unwrap().server.ip, "127.0.0.1");
+    }
+
+    #[test]
+    fn test_missing_config_path() {
+        let path = "/nonexistent/path/to/config.toml";
+
+        let config = read_config(path);
+        assert!(config.is_err());
+        if let Err(e) = config {
+            assert!(e.to_string().contains("file not found"));
         }
     }
 
     #[test]
-    fn test_read_config_invalid() {
-        let config = read_config("./invalid_config.toml");
+    fn test_find_config_all_invalid_paths() {
+        let path1 = "/nonexistent/path/to/config1.toml";
+        let path2 = "/nonexistent/path/to/config2.toml";
+
+        let config = find_config(vec![Some(path1.to_string()), Some(path2.to_string())]);
         assert!(config.is_err());
+        if let Err(e) = config {
+            assert!(e.to_string().contains("No valid config file found"));
+        }
     }
 
     #[test]
-    fn test_read_config_file_not_found() {
-        let config = read_config("./non_existent_file.toml");
+    fn test_invalid_toml_syntax() {
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        let invalid_toml = r#"
+        [server
+        ip = "127.0.0.1"
+        port = 8080
+        "#;
+        write!(tmp_file, "{}", invalid_toml).unwrap();
+
+        let config = read_config(tmp_file.path().to_str().unwrap());
         assert!(config.is_err());
+        if let Err(e) = config {
+            assert!(e.to_string().contains("TOML parse error"));
+        }
     }
 
     #[test]
-    fn test_find_config() {
-        let configs = vec![
-            Some("./non_existent_file.toml".to_string()),
-            Some("tests/orca.http.test.toml".to_string())
-        ];
-        let config = find_config(configs);
+    fn test_invalid_toml_missing_field() {
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        let invalid_toml = r#"
+        [server]
+        ip = "127.0.0.1"
+        "#;
+        write!(tmp_file, "{}", invalid_toml).unwrap();
+
+        let config = read_config(tmp_file.path().to_str().unwrap());
+        assert!(config.is_err());
+        if let Err(e) = config {
+            assert!(e.to_string().contains("missing field"));
+        }
+    }
+
+    #[test]
+    fn test_find_config_multiple_paths() {
+        let mut tmp_file1 = NamedTempFile::new().unwrap();
+        let invalid_toml = r#"
+        [server
+        ip = "127.0.0.1"
+        port = 8080
+        "#;
+        write!(tmp_file1, "{}", invalid_toml).unwrap();
+
+        let mut tmp_file2 = NamedTempFile::new().unwrap();
+        let valid_toml = r#"
+        [server]
+        ip = "127.0.0.1"
+        port = 8080
+        protocol = "Http"
+
+        [authentication]
+        key = "value"
+
+        [calibre]
+        libraries = {}
+        "#;
+        write!(tmp_file2, "{}", valid_toml).unwrap();
+
+        let tmp_file1_path = tmp_file1.path().to_str().unwrap().to_string();
+        let tmp_file2_path = tmp_file2.path().to_str().unwrap().to_string();
+        let config = find_config(vec![Some(tmp_file1_path), Some(tmp_file2_path)]);
         assert!(config.is_ok());
-        let config = config.unwrap();
-        assert_eq!(config.server.ip, "127.0.0.1");
-        assert_eq!(config.server.port, 8888);
+        assert_eq!(config.unwrap().server.ip, "127.0.0.1");
     }
 
     #[test]
-    fn test_find_config_not_found() {
-        let configs = vec![
-            Some("./dosnt.exist.toml".to_string()),
-            Some("./dosnt.exist.either.toml".to_string())
-        ];
-        let config = find_config(configs);
-        assert!(config.is_err());
+    fn test_valid_file_nonexistent() {
+        let path = "/nonexistent_path/to_config.toml";
+        assert!(!valid_file(path));
     }
 
     #[test]
-    fn test_load_config() {
-        env::set_var("ORCA_CONFIG", "tests/orca.http.test.toml");
-        let config = load_config();
-        assert_eq!(config.server.ip, "127.0.0.1");
-        assert_eq!(config.server.port, 8888);
-        env::remove_var("ORCA_CONFIG");
+    fn test_find_config_some_valid_paths() {
+        let mut tmp_file1 = NamedTempFile::new().unwrap();
+        let invalid_toml = r#"
+        [server
+        ip = "127.0.0.1"
+        port = 8080
+        "#;
+        write!(tmp_file1, "{}", invalid_toml).unwrap();
+
+        let mut tmp_file2 = NamedTempFile::new().unwrap();
+        let valid_toml = r#"
+        [server]
+        ip = "127.0.0.1"
+        port = 8080
+        protocol = "Http"
+
+        [authentication]
+        key = "value"
+
+        [calibre]
+        libraries = {}
+        "#;
+        write!(tmp_file2, "{}", valid_toml).unwrap();
+
+        let tmp_file1_path = tmp_file1.path().to_str().unwrap().to_string();
+        let tmp_file2_path = tmp_file2.path().to_str().unwrap().to_string();
+        let config = find_config(vec![Some(tmp_file1_path), Some(tmp_file2_path)]);
+        assert!(config.is_ok());
+        assert_eq!(config.unwrap().server.ip, "127.0.0.1");
     }
 
     #[test]
-    fn test_get_config() {
-        env::set_var("ORCA_CONFIG", "tests/orca.http.test.toml");
-        let config = get();
-        assert_eq!(config.server.ip, "127.0.0.1");
-        assert_eq!(config.server.port, 8888);
+    fn test_protocol_https() {
+        let valid_toml = r#"
+        [server]
+        ip = "127.0.0.1"
+        port = 8080
+        protocol = "Https"
+        cert = "/path/to/cert.pem"
+        key = "/path/to/key.pem"
+
+        [authentication]
+        key = "value"
+
+        [calibre]
+        libraries = {}
+        "#;
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        write!(tmp_file, "{}", valid_toml).unwrap();
+        let config = read_config(tmp_file.path().to_str().unwrap());
+        assert!(config.is_ok());
+        if let Protocol::Https { cert, key } = &config.unwrap().server.protocol {
+            assert_eq!(cert, "/path/to/cert.pem");
+            assert_eq!(key, "/path/to/key.pem");
+        } else {
+            panic!("Expected Https protocol");
+        }
+    }
+
+    #[test]
+    fn test_path_error_display() {
+        let error = PathError {
+            path: String::from("/invalid/path"),
+            error: anyhow!("sample error"),
+        };
+        assert_eq!(format!("{}", error), "/invalid/path : sample error");
+    }
+
+    #[test]
+    fn test_loading_config_from_env_variable() {
+        let valid_toml = r#"
+        [server]
+        ip = "127.0.0.1"
+        port = 8080
+        protocol = "Http"
+
+        [authentication]
+        key = "value"
+
+        [calibre]
+        libraries = {}
+        "#;
+        let mut tmp_file = NamedTempFile::new().unwrap();
+        write!(tmp_file, "{}", valid_toml).unwrap();
+        env::set_var("ORCA_CONFIG", tmp_file.path());
+
+        let config = read_config(tmp_file.path().to_str().unwrap());
+        assert!(config.is_ok());
+        assert_eq!(get().server.ip, "127.0.0.1");
         env::remove_var("ORCA_CONFIG");
     }
 }

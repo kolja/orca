@@ -16,6 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Rust
         uses: actions-rs/toolchain@v1
         with:
@@ -37,6 +38,7 @@ jobs:
         uses: coverallsapp/github-action@v2.3.4
 
   create-release:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: run-tests
     runs-on: ubuntu-latest
     steps:
@@ -46,6 +48,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   upload-assets:
+    if: startsWith(github.ref, 'refs/tags/')
     needs: create-release
     strategy:
       matrix:

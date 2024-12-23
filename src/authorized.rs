@@ -48,31 +48,27 @@ impl FromRequest for Authorized {
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         let config = &data.config;
 
-        let result = req
-            .headers()
-            .get(header::AUTHORIZATION)
-            .and_then(|s| s.to_str().ok())
-            .and_then(|s| s.strip_prefix("Basic "))
-            .and_then(|s| BASE64.decode(s).ok())
-            .and_then(|vec| String::from_utf8(vec).ok())
-            .and_then(|credentials_string| {
-                let (login, _pass) = credentials_string.split_once(":")?;
-                let hash_salt = config.authentication.get(login)?;
-                let (hash, salt) = hash_salt.split_once(":")?;
+    let result = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|s| s.to_str().ok())
+        .and_then(|s| s.strip_prefix("Basic "))
+        .and_then(|s| BASE64.decode(s).ok())
+        .and_then(|vec| String::from_utf8(vec).ok())
+        .and_then(|credentials_string| {
+            let (login, password) = credentials_string.split_once(":")?;
 
-                match LoginData::new_with_salt(&credentials_string, salt) {
-                    Ok(login_data) => {
-                        if login_data.hash() == hash {
-                            Some(Authorized {
-                                credentials: credentials_string,
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
+            if let Some(hash) = config.authentication.get(login) {
+                let login_data = LoginData::new_with_hash(login, password, hash).ok()?;
+                if login_data.verify_password().ok()? {
+                    return Some(Authorized {
+                        credentials: credentials_string,
+                    });
                 }
-            });
+            }
+
+            None
+        });
 
         match result {
             Some(auth) => ready(Ok(auth)),

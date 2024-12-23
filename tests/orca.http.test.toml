@@ -5,7 +5,7 @@ port = 8888
 protocol = "Http"
 
 [authentication]
-alice = "5935b30f8b030fcaef20:GOwjUGVz54O0FmlicmDb"
+alice = "$argon2id$v=19$m=19456,t=2,p=1$G57mIrlohNqdISyznvXyhw$qNaLVhDp+FJfK38DfJKQOORVG9Mpp00I6EqWz6lsrnQ"
 
 [calibre.libraries]
 library = "tests/calibre"

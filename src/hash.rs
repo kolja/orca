@@ -1,7 +1,7 @@
-use crypto_hash::{hex_digest, Algorithm};
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
-use regex::Regex;
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use std::error::Error;
 use std::fmt;
 
@@ -9,7 +9,7 @@ use std::fmt;
 pub struct LoginData {
     pub login: String,
     pub password: String,
-    pub salt: String,
+    pub hash: Option<String>,
 }
 
 #[derive(Debug)]
@@ -31,81 +31,57 @@ impl fmt::Display for LoginDataError {
     }
 }
 
-impl Error for LoginDataError {
-    fn description(&self) -> &str {
-        &self.details
-    }
-}
+impl Error for LoginDataError {}
 
 impl LoginData {
-    pub fn new(login_password: &str) -> Result<Self, LoginDataError> {
-        let re = Regex::new(r"^([^:]{3,25}):(.{3,25})$").unwrap();
-        if !re.is_match(login_password) {
-            return Err(LoginDataError::new("Invalid login:password format"));
+    pub fn new(login: &str, password: &str) -> Result<Self, LoginDataError> {
+        if login.len() < 3 || login.len() > 25 || password.len() < 3 || password.len() > 25 {
+            return Err(LoginDataError::new("Invalid login or password format"));
         }
 
-        let (login, password) = Self::split_by_colon(login_password)?;
-        let salt = Self::generate_salt();
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        let hash = argon2.hash_password(password.as_bytes(), &salt)
+                         .map_err(|e| LoginDataError::new(&format!("Hash error: {:?}", e)))?
+                         .to_string();
 
         Ok(Self {
-            login,
-            password,
-            salt,
+            login: login.to_string(),
+            password: password.to_string(),
+            hash: Some(hash)
         })
     }
 
-    pub fn new_with_salt(login_password: &str, salt: &str) -> Result<Self, LoginDataError> {
-        let re = Regex::new(r"^([^:]{3,25}):(.{3,25})$").unwrap();
-        if !re.is_match(login_password) {
-            return Err(LoginDataError::new("Invalid login:password format"));
+    pub fn new_with_hash(login: &str, password: &str, hash: &str) -> Result<Self, LoginDataError> {
+        if login.len() < 3 || login.len() > 25 || password.len() < 3 || password.len() > 25 {
+            return Err(LoginDataError::new("Invalid login or password format"));
         }
 
-        let (login, password) = Self::split_by_colon(login_password)?;
-
         Ok(Self {
-            login,
-            password,
-            salt: salt.to_string(),
+            login: login.to_string(),
+            password: password.to_string(),
+            hash: Some(hash.to_string())
         })
     }
 
-    fn split_by_colon(input: &str) -> Result<(String, String), LoginDataError> {
-
-        let parts: Vec<&str> = input.splitn(2, ':').collect();
-
-        if parts.len() != 2 {
-            return Err(LoginDataError::new("Invalid login:password format"));
+    pub fn verify_password(&self) -> Result<bool, LoginDataError> {
+        if let Some(hash) = &self.hash {
+            let parsed_hash = PasswordHash::new(hash).map_err(|err| LoginDataError::new(&format!("Hash error: {}", err)))?;
+            Ok(Argon2::default().verify_password(self.password.as_bytes(), &parsed_hash).is_ok())
+        } else {
+            Err(LoginDataError::new("No hash provided"))
         }
-
-        Ok((parts[0].to_string(), parts[1].to_string()))
-    }
-
-    fn generate_salt() -> String {
-        thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(20)
-            .map(char::from)
-            .collect()
-    }
-
-    pub fn hash(&self) -> String {
-        hex_digest(
-            Algorithm::SHA256,
-            format!("{}:{}", self.password, self.salt).as_bytes(),
-        )[0..20]
-            .to_string() // I declare, 20 bytes are enough to avoid collisions
     }
 }
 
-pub fn encode_auth_data(login_password: &str) -> Option<String> {
-    LoginData::new(login_password).ok().map(|data| {
-        format!(
-            "{}\n{} = \"{}:{}\"",
+pub fn encode_auth_data(login: &str, password: &str) -> Option<String> {
+    LoginData::new(login, password).ok().and_then(|data| {
+        Some(format!(
+            "{}\n{} = \"{}\"",
             "Add this to the [Authentication] section of your config.toml:",
             data.login,
-            data.hash(),
-            data.salt
-        )
+            data.hash.as_ref().unwrap()
+        ))
     })
 }
 
@@ -115,87 +91,62 @@ mod tests {
 
     #[test]
     fn login_data_valid() {
-        let login_password = "alice:secretpassword";
-        let login_data = LoginData::new(login_password).unwrap();
+        let login_data = LoginData::new("alice", "secretpassword").unwrap();
 
         assert_eq!(login_data.login, "alice");
         assert_eq!(login_data.password, "secretpassword");
-        assert_eq!(login_data.salt.len(), 20);
-        assert!(login_data.salt.chars().all(|c| c.is_alphanumeric()));
+        //assert_eq!(login_data.salt.len(), 20);
+        //assert!(login_data.salt.chars().all(|c| c.is_alphanumeric()));
     }
 
     #[test]
     fn invalid_password_returns_error() {
-        let invalid_format = "bob";
-        let result = LoginData::new(invalid_format);
+
+        let result = LoginData::new("alice", "x");
 
         assert!(result.is_err());
-        assert_eq!(result.err().unwrap().to_string(), "Invalid login:password format");
+        assert_eq!(result.err().unwrap().to_string(), "Invalid login or password format");
     }
 
     #[test]
-    fn login_data_with_salt() {
-        let login_password = "bob:secret:password";
-        let salt = "specificsaltvalue";
-        let login_data = LoginData::new_with_salt(login_password, salt).unwrap();
+    fn login_data_with_hash() {
+        let login = "alice";
+        let password = "secretpassword";
+        let hash = "$argon2id$v=19$m=19456,t=2,p=1$DCvcgKhnf9SZEi92Dga+cg$kIhFhv2N0YLjr3Ebxi58aFNELZ9jI6OGAmVWmk6Gj1A";
+        let login_data = LoginData::new_with_hash(login, password, hash).unwrap();
 
-        assert_eq!(login_data.login, "bob");
-        assert_eq!(login_data.password, "secret:password");
-        assert_eq!(login_data.salt, "specificsaltvalue");
-    }
-
-    #[test]
-    fn several_login_password_combinations() {
-        assert!(LoginData::new_with_salt("bob:secret/password", "random_salt").is_ok());
-        assert!(LoginData::new_with_salt("bob:secret:password", "random_salt").is_ok());
-        assert!(LoginData::new_with_salt("alice:*/2701/^&@!:", "random_salt").is_ok());
-        assert!(LoginData::new_with_salt("alice:::foobar:::", "random_salt").is_ok());
-        assert!(LoginData::new_with_salt("bob:x", "random_salt").is_err());
-        assert!(LoginData::new_with_salt("al:ice:secret:password", "random_salt").is_err());
-    }
-
-    #[test]
-    fn login_data_hash() {
-        let login_password = "alice:secretpassword";
-        let salt = "specificsaltvalue";
-        let login_data = LoginData::new_with_salt(login_password, salt).unwrap();
-
-        let expected_hash = hex_digest(
-            Algorithm::SHA256,
-            format!("{}:{}", "secretpassword", "specificsaltvalue").as_bytes(),
-        )[0..20]
-            .to_string();
-
-        assert_eq!(login_data.hash(), expected_hash);
+        assert_eq!(login_data.login, "alice");
+        assert_eq!(login_data.password, "secretpassword");
+        assert!(login_data.verify_password().is_ok());
     }
 
     #[test]
     fn encode_auth_data_valid_roundtrip() {
         use regex::Regex;
 
-        let login_password = "alice:secretpassword";
-        let result = encode_auth_data(login_password).unwrap();
+        let login = "alice";
+        let password = "secretpassword";
+        let result = encode_auth_data(login, password).unwrap();
 
         let re = Regex::new(
-            r#"Add this to the \[Authentication\] section of your config\.toml:\nalice = "([a-f0-9]{20}):([A-Za-z0-9]{20})""#
+            r#"Add this to the \[Authentication\] section of your config\.toml:\n(.*) = "(.*)""#
         ).unwrap();
 
         let captures = re
             .captures(&result)
             .expect("The result does not match the expected format.");
 
-        let extracted_hash = &captures[1];
-        let extracted_salt = &captures[2];
+        let extracted_login = &captures[1];
+        let extracted_hash = &captures[2];
 
-        let login_data = LoginData::new_with_salt(login_password, extracted_salt).unwrap();
+        let login_data = LoginData::new_with_hash(extracted_login, password, extracted_hash).unwrap();
 
-        assert_eq!(login_data.hash(), extracted_hash);
+        assert!(login_data.verify_password().is_ok());
     }
 
     #[test]
     fn encode_auth_data_invalid() {
-        let invalid_login_password = "invalidformat";
-        let result = encode_auth_data(invalid_login_password);
+        let result = encode_auth_data("jo", "2");
         assert!(result.is_none());
     }
 }

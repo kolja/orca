@@ -38,7 +38,7 @@ impl ResponseError for UnauthorizedError {
 
 #[derive(Serialize, Deserialize)]
 pub struct Authorized {
-    pub credentials: String,
+    pub login: String,
 }
 
 fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorized> {
@@ -48,15 +48,13 @@ fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorize
                .and_then(|vec| String::from_utf8(vec).ok())
                .and_then(|loginpassword| {
                    let (login, password) = loginpassword.split_once(":")?;
-                   let hash_option = config.authentication.get(login);
-                   hash_option.and_then(|hash| {
-                       match hash::verify_password(password, hash).ok()? {
-                           true => Some(Authorized {
-                                credentials: format!("{}:{}", login, password),
-                           }),
-                           false => None,
-                       }
-                   })
+                   let hash = config.authentication.get(login)?;
+                   match hash::verify_password(password, hash).ok()? {
+                       true => Some(Authorized {
+                            login: login.to_string(),
+                       }),
+                       false => None,
+                   }
                })
 }
 

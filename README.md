@@ -17,7 +17,7 @@ It supports http and https, basic authentication and multiple libraries.
 ### Homebrew
 ```bash
 brew tap kolja/orca
-brew install kolja/orca/orca
+brew install orca-server
 ```
 ### Docker
 ```bash
@@ -38,13 +38,13 @@ The server will either start as HTTP or HTTPS server depending on the value of '
 [server]
 ip = "<your_ip>"
 port = 8080
-protocol = "https" # or "http"
+protocol = "Https" # or "Http"
 cert = "/path/to/cert.pem"
 key = "/path/to/key.pem"
 
 [authentication]
-alice = "468a286ae97d67f84b56:94Gxd6BCmgkBAtMEIxjW"
-bob = "9a8692aeabe66ebfa609:iK4ODmrJ6RsD8CYRjcY6"
+alice = "$argon2id$v=19$m=19456,t=2,p=1$bK0qYfzAokhthFP0fKBQvg$QPPf54SN74dT2YX4aGoN+KxoWD+xV+c6OBrrPnvxj24"
+bob = "$argon2id$v=19$m=19456,t=2,p=1$FMnONzRzIAkaIuy3c+A9cg$DE3+UC62d/f+L0jqEWgz9GAfNWQkKfugeZFSL/FG5XQ"
 
 [calibre.libraries]
 library = "/Volumes/library"

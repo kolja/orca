@@ -1,13 +1,14 @@
 use actix_web::{
     dev::Payload,
     error::ResponseError,
-    http::{header, StatusCode},
+    http::{header, header::HeaderValue, StatusCode},
     web, Error, FromRequest, HttpRequest, HttpResponse,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
+use crate::hash;
+use crate::config::Config;
 use crate::appstate::AppState;
-use crate::hash::LoginData;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use std::future::{ready, Ready};
@@ -40,6 +41,25 @@ pub struct Authorized {
     pub credentials: String,
 }
 
+fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorized> {
+    let credentials = header.to_str().ok()?;
+    credentials.strip_prefix("Basic ")
+               .and_then(|s| BASE64.decode(s).ok())
+               .and_then(|vec| String::from_utf8(vec).ok())
+               .and_then(|loginpassword| {
+                   let (login, password) = loginpassword.split_once(":")?;
+                   let hash_option = config.authentication.get(login);
+                   hash_option.and_then(|hash| {
+                       match hash::verify_password(password, hash).ok()? {
+                           true => Some(Authorized {
+                                credentials: format!("{}:{}", login, password),
+                           }),
+                           false => None,
+                       }
+                   })
+               })
+}
+
 impl FromRequest for Authorized {
     type Error = Error;
     type Future = Ready<Result<Self, Self::Error>>;
@@ -48,27 +68,8 @@ impl FromRequest for Authorized {
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         let config = &data.config;
 
-    let result = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|s| s.to_str().ok())
-        .and_then(|s| s.strip_prefix("Basic "))
-        .and_then(|s| BASE64.decode(s).ok())
-        .and_then(|vec| String::from_utf8(vec).ok())
-        .and_then(|credentials_string| {
-            let (login, password) = credentials_string.split_once(":")?;
-
-            if let Some(hash) = config.authentication.get(login) {
-                let login_data = LoginData::new_with_hash(login, password, hash).ok()?;
-                if login_data.verify_password().ok()? {
-                    return Some(Authorized {
-                        credentials: credentials_string,
-                    });
-                }
-            }
-
-            None
-        });
+        let result = req.headers().get(header::AUTHORIZATION)
+                                  .and_then(|header| verify_credentials(header, config));
 
         match result {
             Some(auth) => ready(Ok(auth)),

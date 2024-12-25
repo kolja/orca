@@ -1,6 +1,6 @@
 use clap::Parser;
 use std::process::exit;
-use orca::{config, create_app, run_server, hash::encode_auth_data};
+use orca::{config, create_app, run_server, hash};
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
     args.login_password.as_ref()
         .and_then(|login_password| {
             let (login, password) = login_password.split_once(":")?;
-            encode_auth_data(login, password)
+            hash::encode_auth_data(login, password).ok()
         })
         .map(|auth_data| {
             println!("{}", auth_data);

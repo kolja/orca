@@ -16,3 +16,9 @@ script = [
   "./docker/git-tag.sh"
 ]
 
+[tasks.list-sha]
+description = "list sha-sum for all Assets in Release"
+script = [
+  "./docker/list-sha.sh"
+]
+

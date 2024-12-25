@@ -9,7 +9,25 @@
 [![dependency status](https://deps.rs/repo/github/kolja/orca/status.svg?path=%2F)](https://deps.rs/repo/github/kolja/orca?path=%2F)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A simple OPDS Server for Calibre written in Rust
+A simple OPDS Server for Calibre written in Rust.
+It supports http and https, basic authentication and multiple libraries.
+
+## Installation
+
+### Homebrew
+```bash
+brew tap kolja/orca
+brew install kolja/orca/orca
+```
+### Docker
+```bash
+docker pull koljaw/orca
+docker run -p 8080:8080 \
+-e ORCA_CONFIG=/app/orca.toml \
+-v /path/to/your/config.toml:/app/orca.toml \
+-v /path/to/your/library:/app/library \
+koljaw/orca:latest
+```
 
 ## Configuration
 
@@ -47,6 +65,7 @@ There are a couple of tasks you can run with `cargo make`:
 
 - `cargo make docker-build <image/name>` - Build Docker image and push it to the registry
 - `cargo make git-tag` - Create and push a new git tag. The Version number is read from `Cargo.toml`
+- `cargo make list-sha` - List all the sha256 hashes for the Assets in the Release (for use with the the homebrew formula)
 
 ## License
 

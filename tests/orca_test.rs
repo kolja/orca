@@ -36,20 +36,20 @@ async fn setup(protocol: Protocol) -> impl Service<Request, Response = ServiceRe
 
 // ------- Http Tests -------
 
-#[actix_web::test]
+#[test]
 async fn unauthorized_request() {
     let app = setup(Http).await;
-    let req = test::TestRequest::with_uri("/")
+    let req = test::TestRequest::with_uri("/library")
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
-#[actix_web::test]
+#[test]
 async fn authorized_request() {
     let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/")
+    let req = test::TestRequest::with_uri("/library")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -61,7 +61,7 @@ async fn authorized_request() {
     assert!(is_opds(&content));
 }
 
-#[actix_web::test]
+#[test]
 async fn list_books() {
     let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
@@ -79,17 +79,42 @@ async fn list_books() {
 
 // ------- Https Tests -------
 
-#[actix_web::test]
+#[test]
 async fn unauthorized_request_https() {
     let app = setup(Https).await;
-    let req = test::TestRequest::with_uri("/")
+    let req = test::TestRequest::with_uri("/library")
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
-#[actix_web::test]
+#[test]
+async fn unauthorized_request_public_route_https() {
+    let app = setup(Https).await;
+    let req = test::TestRequest::with_uri("/")
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+}
+
+#[test]
 async fn authorized_request_https() {
+    let app = setup(Https).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(is_opds(&content));
+}
+
+#[test]
+async fn authorized_request_to_public_route_https() {
     let app = setup(Https).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/")

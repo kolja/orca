@@ -6,8 +6,11 @@ protocol = "Https"
 cert = "tests/cert.pem"
 key = "tests/key.pem"
 
-[authentication]
+[authentication.login]
 alice = "$argon2id$v=19$m=19456,t=2,p=1$G57mIrlohNqdISyznvXyhw$qNaLVhDp+FJfK38DfJKQOORVG9Mpp00I6EqWz6lsrnQ"
+
+[authentication]
+public = ["/"]
 
 [calibre.libraries]
 library = "tests/calibre"

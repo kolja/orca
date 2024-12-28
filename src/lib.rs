@@ -6,6 +6,7 @@ pub mod config;
 pub mod tls;
 pub mod hash;
 pub mod routes;
+pub mod pattern;
 
 use actix_web::{web, App, HttpServer};
 use rusqlite::Connection;

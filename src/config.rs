@@ -1,13 +1,17 @@
+
 use dirs::home_dir;
+use std::{env, fmt, fs, collections::HashMap};
+// use regex::Regex;
 use serde_derive::{Deserialize, Serialize};
-use std::{fs, env, collections::HashMap, fmt};
+use crate::pattern::Pattern;
+
 use once_cell::sync::Lazy;
 use anyhow::{Context, Error, Result, anyhow};
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize)]
 pub struct Config {
     pub server: Server,
-    pub authentication: HashMap<String, String>,
+    pub authentication: Authentication,
     pub calibre: Calibre,
 }
 
@@ -27,6 +31,22 @@ pub struct Server {
     pub port: u16,
     #[serde(flatten)]
     pub protocol: Protocol,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Authentication {
+    pub login: HashMap<String, String>,
+    #[serde(default)]
+    pub public: Vec<Pattern>,
+}
+
+impl Default for Authentication {
+    fn default() -> Self {
+        Authentication {
+            login: HashMap::new(),
+            public: vec![]
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -121,6 +141,7 @@ pub fn get() -> &'static Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
     use tempfile::NamedTempFile;
     use std::io::Write;
 
@@ -133,8 +154,8 @@ mod tests {
         port = 8080
         protocol = "Http"
 
-        [authentication]
-        key = "value"
+        [authentication.login]
+        alice = "...passwordhash..."
 
         [calibre]
         libraries = {}
@@ -207,7 +228,7 @@ mod tests {
         let mut tmp_file1 = NamedTempFile::new().unwrap();
         let invalid_toml = r#"
         [server
-        ip = "127.0.0.1"
+        foo = "127.0.0.1"
         port = 8080
         "#;
         write!(tmp_file1, "{}", invalid_toml).unwrap();
@@ -219,8 +240,8 @@ mod tests {
         port = 8080
         protocol = "Http"
 
-        [authentication]
-        key = "value"
+        [authentication.login]
+        alice = "...passwordhash..."
 
         [calibre]
         libraries = {}
@@ -245,8 +266,8 @@ mod tests {
         let mut tmp_file1 = NamedTempFile::new().unwrap();
         let invalid_toml = r#"
         [server
-        ip = "127.0.0.1"
-        port = 8080
+        foo = "127.0.0.1"
+        bar = 8080
         "#;
         write!(tmp_file1, "{}", invalid_toml).unwrap();
 
@@ -257,8 +278,8 @@ mod tests {
         port = 8080
         protocol = "Http"
 
-        [authentication]
-        key = "value"
+        [authentication.login]
+        bob = "...passwordhash..."
 
         [calibre]
         libraries = {}
@@ -282,8 +303,8 @@ mod tests {
         cert = "/path/to/cert.pem"
         key = "/path/to/key.pem"
 
-        [authentication]
-        key = "value"
+        [authentication.login]
+        alice = "...passwordhash..."
 
         [calibre]
         libraries = {}
@@ -317,8 +338,12 @@ mod tests {
         port = 8080
         protocol = "Http"
 
+        [authentication.login]
+        alice = "...reallylonghash..."
+        bob = "...relativelylonghash..."
+
         [authentication]
-        key = "value"
+        public = ["/", "/library/*"]
 
         [calibre]
         libraries = {}

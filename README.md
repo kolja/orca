@@ -42,9 +42,12 @@ protocol = "Https" # or "Http"
 cert = "/path/to/cert.pem"
 key = "/path/to/key.pem"
 
-[authentication]
+[authentication.login]
 alice = "$argon2id$v=19$m=19456,t=2,p=1$bK0qYfzAokhthFP0fKBQvg$QPPf54SN74dT2YX4aGoN+KxoWD+xV+c6OBrrPnvxj24"
 bob = "$argon2id$v=19$m=19456,t=2,p=1$FMnONzRzIAkaIuy3c+A9cg$DE3+UC62d/f+L0jqEWgz9GAfNWQkKfugeZFSL/FG5XQ"
+
+[authentication]
+public = ["/", "/library/**"] # the root endpoint is publicly accessible, so is everything under /library
 
 [calibre.libraries]
 library = "/Volumes/library"
@@ -57,7 +60,9 @@ The server supports basic authentication: You can generate a password hash like 
 ```bash
 orca --hash <login>:<password> # e.g. orca --hash alice:secretpassword
 ```
-The server will print the hash which you have to copy to the `[authentication]` section of your config file.
+The server will print the hash which you have to copy to the `[authentication.login]` section of your config file.
+
+Under the `public` array in the `[authentication]` section you can specify which paths should be accessible without authentication. You can use wildcards like `*` and `**` to match multiple paths.
 
 ## Development
 

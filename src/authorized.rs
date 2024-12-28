@@ -48,7 +48,7 @@ fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorize
                .and_then(|vec| String::from_utf8(vec).ok())
                .and_then(|loginpassword| {
                    let (login, password) = loginpassword.split_once(":")?;
-                   let hash = config.authentication.get(login)?;
+                   let hash = config.authentication.login.get(login)?;
                    match hash::verify_password(password, hash).ok()? {
                        true => Some(Authorized {
                             login: login.to_string(),
@@ -65,6 +65,7 @@ impl FromRequest for Authorized {
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let data = req.app_data::<web::Data<AppState>>().unwrap();
         let config = &data.config;
+        let path = req.uri().path();
 
         let result = req.headers().get(header::AUTHORIZATION)
                                   .and_then(|header| verify_credentials(header, config));
@@ -72,10 +73,19 @@ impl FromRequest for Authorized {
         match result {
             Some(auth) => ready(Ok(auth)),
             None => {
-                let error = UnauthorizedError {
-                    message: "Unauthorized",
-                };
-                ready(Err(error.into()))
+                let public_routes = &config.authentication.public;
+                let is_public = public_routes.iter().any(|pat| pat.regex.is_match(path));
+
+                if is_public {
+                    ready(Ok(Authorized {
+                        login: "Guest".to_string(),
+                    }))
+                } else {
+                    let error = UnauthorizedError {
+                        message: "Unauthorized",
+                    };
+                    ready(Err(error.into()))
+                }
             }
         }
     }

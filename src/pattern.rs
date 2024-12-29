@@ -20,14 +20,14 @@ impl Pattern {
             return Err(anyhow!("Pattern contains more than one '**'"));
         }
 
-        let regex_pattern = pattern
+        let double_star = Regex::new(r"\/?\*\*")?;
+        let regex_pattern = double_star
+            .replace_all( pattern, "_DBLSTAR_")// Replace '**' with `_DBLSTAR_` ...
             .replace("/", "\\/")
             .replace(".", "\\.")
-            .replace("**", "_DOUBLESTAR_") // Replace '**' with a unique string
             .replace("*", "[^/]*")
-            .replace("_DOUBLESTAR_", ".*") // ...to avoid clashes with the single '*'
-            .replace("?", "[^/]")
-            .replace("\\/\\/", "\\/"); // x/**/y -> x/y not x//y
+            .replace("_DBLSTAR_", ".*") // ...to avoid clashes with the single '*'
+            .replace("?", "[^/]");
 
         let regex_pattern = format!("^{}$", regex_pattern);
         let regex = Regex::new(&regex_pattern)?;
@@ -36,6 +36,9 @@ impl Pattern {
             pattern: pattern.to_string(),
             regex,
         })
+    }
+    pub fn is_match(&self, path: &str) -> bool {
+        self.regex.is_match(path)
     }
 }
 
@@ -108,11 +111,14 @@ mod tests {
     fn pattern_regex_conversion() {
         let patterns = [
             ("/", r"^\/$"),
-            ("/bar", r"^\/bar$"),
-            ("/baz/*", r"^\/baz\/[^/]*$"),
-            ("/baz/**", r"^\/baz\/.*$"),
+            ("/**", r"^.*$"),
+            ("**", r"^.*$"),
+            ("/foo", r"^\/foo$"),
+            ("/foo/*.pdf", r"^\/foo\/[^/]*\.pdf$"),
+            ("/foo/**", r"^\/foo.*$"),
+            ("/foo/**/bar", r"^\/foo.*\/bar$"),
             ("/foo/*/bar", r"^\/foo\/[^/]*\/bar$"),
-            ("/foo/?/bar", r"^\/foo\/[^/]\/bar$"),
+            ("/foo/???/bar", r"^\/foo\/[^/][^/][^/]\/bar$"),
         ];
 
         for (pattern_str, expected_regex) in &patterns {
@@ -123,7 +129,7 @@ mod tests {
     }
 
     #[test]
-    fn pattern_multiple_double_asterisks() {
+    fn many_double_asterisks_not_allowed() {
         let pattern_str = "/foo/**/bar/**";
         let pattern = Pattern::new(pattern_str);
         assert!(pattern.is_err());

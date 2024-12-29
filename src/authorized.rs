@@ -74,7 +74,7 @@ impl FromRequest for Authorized {
             Some(auth) => ready(Ok(auth)),
             None => {
                 let public_routes = &config.authentication.public;
-                let is_public = public_routes.iter().any(|pat| pat.regex.is_match(path));
+                let is_public = public_routes.iter().any(|pat| pat.is_match(path));
 
                 if is_public {
                     ready(Ok(Authorized {

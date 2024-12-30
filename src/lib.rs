@@ -19,7 +19,7 @@ use tera::Value;
 
 use config::{Config, Protocol};
 use templates::Template;
-use routes::{authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, tags};
+use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, tags};
 use appstate::AppState;
 
 // Tera filter to convert format to mime type
@@ -115,6 +115,7 @@ pub async fn run_server(state: AppState) -> std::io::Result<()> {
 }
 
 pub fn init(cfg: &mut web::ServiceConfig) {
+    cfg.service(health);
     cfg.service(index);
     cfg.service(opds);
     cfg.service(tags);

@@ -1,0 +1,9 @@
+{% extends "layout.xml.tera" %}
+{% block content %}
+
+  <title>ORCA</title>
+  <h1>ORCA</h1>
+  <p>ORCA is a simple OPDS server.</p>
+
+{% endblock content %}
+

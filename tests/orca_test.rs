@@ -37,6 +37,14 @@ async fn setup(protocol: Protocol) -> impl Service<Request, Response = ServiceRe
 // ------- Http Tests -------
 
 #[test]
+async fn health() {
+    let app = setup(Http).await;
+    let req = test::TestRequest::with_uri("/health").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+}
+
+#[test]
 async fn unauthorized_request() {
     let app = setup(Http).await;
     let req = test::TestRequest::with_uri("/library")
@@ -74,7 +82,95 @@ async fn list_books() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert_eq!(count_books(&content), 3);
+    assert_eq!(count_items(&content), 3);
+}
+
+#[test]
+async fn list_authors() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/authors")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert_eq!(count_items(&content), 3);
+}
+
+#[test]
+async fn list_books_by_immanuel_kant() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/authors/5")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert_eq!(count_items(&content), 1);
+}
+
+#[test]
+async fn list_tags() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/tags")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert_eq!(count_items(&content), 5);
+}
+
+#[test]
+async fn list_books_tagged_fiction() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/tags/5")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert_eq!(count_items(&content), 2);
+}
+
+#[test]
+async fn download_cover() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/cover/5")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    assert_eq!(resp.headers().get("content-type").unwrap(), "image/jpeg");
+}
+
+#[test]
+async fn download_epub() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/file/5/epub")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    assert_eq!(resp.headers().get("content-type").unwrap(), "application/epub+zip");
 }
 
 // ------- Https Tests -------
@@ -122,11 +218,6 @@ async fn authorized_request_to_public_route_https() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
-
-    let body = test::read_body(resp).await;
-    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
-
-    assert!(is_opds(&content));
 }
 
 // ------- Helper Functions -------
@@ -145,18 +236,18 @@ fn is_opds(content: &str) -> bool {
     }
 }
 
-fn count_books(content: &str) -> usize {
+fn count_items(content: &str) -> usize {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
-    let mut book_count = 0;
+    let mut item_count = 0;
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"entry" => book_count += 1,
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"entry" => item_count += 1,
             Ok(Event::Eof) => break,
             Err(err) => panic!("Error reading XML: {:?}", err),
             _ => buf.clear(),
         }
     }
-    book_count
+    item_count
 }

@@ -91,7 +91,7 @@ async fn unauthorized_request_https() {
 #[test]
 async fn unauthorized_request_public_route_https() {
     let app = setup(Https).await;
-    let req = test::TestRequest::with_uri("/")
+    let req = test::TestRequest::with_uri("/health")
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -117,7 +117,7 @@ async fn authorized_request_https() {
 async fn authorized_request_to_public_route_https() {
     let app = setup(Https).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/")
+    let req = test::TestRequest::with_uri("/health")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;

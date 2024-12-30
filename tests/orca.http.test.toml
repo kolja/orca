@@ -8,8 +8,7 @@ protocol = "Http"
 alice = "$argon2id$v=19$m=19456,t=2,p=1$G57mIrlohNqdISyznvXyhw$qNaLVhDp+FJfK38DfJKQOORVG9Mpp00I6EqWz6lsrnQ"
 
 [authentication]
-pubilc = ["/"]
-
+pubilc = ["/health"]
 
 [calibre.libraries]
 library = "tests/calibre"

@@ -65,6 +65,11 @@ fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> HttpRespo
     }
 }
 
+#[actix_web::get("/health")]
+async fn health(_auth: Authorized) -> impl Responder {
+    HttpResponse::Ok().body("OK")
+}
+
 #[actix_web::get("/{lib}/cover/{id}")]
 async fn cover(
     data: web::Data<AppState>,
@@ -159,6 +164,14 @@ async fn index(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) 
     let mut ctx = tera::Context::new();
 
     let libraries: Vec<String> = data.db.keys().cloned().collect();
+
+    if libraries.len() == 1 {
+        let lib = &libraries[0];
+        return HttpResponse::Found()
+            .append_header(("Location", format!("/{}", lib)))
+            .finish();
+    }
+
     ctx.insert("config", &data.config);
     ctx.insert("libraries", &libraries);
     render_template(&data.templates, "index.xml.tera", ctx)

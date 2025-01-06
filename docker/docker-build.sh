@@ -29,7 +29,7 @@ else
     docker buildx use mybuilder
 fi
 
-# Build and push the image
-CMD="docker buildx build -f ${DOCKERFILE} --platform linux/amd64,linux/arm64 --build-arg VERSION=v${VERSION} -t ${IMAGE_NAME}:v${VERSION} --push ."
+# Build, tag, and push both the versioned and latest images
+CMD="docker buildx build -f ${DOCKERFILE} --platform linux/amd64,linux/arm64 --build-arg VERSION=v${VERSION} -t ${IMAGE_NAME}:v${VERSION} -t ${IMAGE_NAME}:latest --push ."
 echo -e "Running Now:\n $CMD"
-docker buildx build -f ${DOCKERFILE} --platform linux/amd64,linux/arm64 --build-arg VERSION=v${VERSION} -t ${IMAGE_NAME}:v${VERSION} --push .
+docker buildx build -f ${DOCKERFILE} --platform linux/amd64,linux/arm64 --build-arg VERSION=v${VERSION} -t ${IMAGE_NAME}:v${VERSION} -t ${IMAGE_NAME}:latest --push .

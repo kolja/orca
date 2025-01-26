@@ -4,7 +4,7 @@ version = "0.1.13"
 edition = "2021"
 
 [dependencies]
-tokio = "1.41.0"
+tokio = "1.43"
 actix-web = { version = "4.9", features = ["rustls-0_23"]}
 actix-files = "0.6"
 base64 = "0.22"
@@ -14,7 +14,7 @@ serde_json = "1.0"
 serde_derive = "1.0.136"
 lazy_static = "1.5.0"
 tera = "1.20.0"
-rusqlite = { version = "0.32.1", features = ["bundled"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
 html2text = "0.13.3"
 dirs = "6.0"
 clap = {version = "*", features = ["derive"]}
@@ -33,7 +33,7 @@ openssl = { version = "0.10", features = ["vendored"] }
 [dev-dependencies]
 assert_cmd = "2.0"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1.43", features = ["full"] }
 quick-xml = "0.37"
 actix-http = "3.9"
 cargo-tarpaulin = "0.31.3"

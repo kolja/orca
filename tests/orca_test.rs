@@ -228,7 +228,7 @@ fn is_opds(content: &str) -> bool {
     let mut buf = Vec::new();
     loop {
         match reader.read_event_into(&mut buf) {
-            Ok(Event::Start(ref e)) if e.name().as_ref() == b"feed" => break(true),
+            Ok(Event::Start(ref e)) if e.name().as_ref() == b"feed" => break true,
             Ok(Event::Eof) => panic!("Reached end of XML without finding feed"),
             Err(err) => panic!("Error reading XML: {:?}", err),
             _ => buf.clear(),

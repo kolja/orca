@@ -67,6 +67,10 @@ pub fn create_app(config: &'static Config) -> AppState {
         .collect();
 
     tera.add_raw_templates(templates).expect("Failed to add templates");
+    // Embedded template names end in `.xml.tera`, which Tera does not
+    // auto-escape by default. Escape dynamic values so Calibre metadata such
+    // as ampersands cannot produce malformed OPDS XML.
+    tera.autoescape_on(vec![".html", ".htm", ".xml", ".xml.tera"]);
     tera.register_filter("format_to_mime", format_to_mime_filter);
 
     AppState {

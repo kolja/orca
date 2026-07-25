@@ -86,6 +86,33 @@ async fn list_books() {
 }
 
 #[test]
+async fn book_metadata_is_xml_escaped() {
+    let state = create_app(&TEST_HTTP_CONFIG);
+    let mut context = tera::Context::new();
+    context.insert("config", &state.config);
+    context.insert("lib", "library");
+    context.insert("books", &serde_json::json!([{
+        "id": 999,
+        "title": "Fish & Chips <Special>",
+        "pubdate": "2026-01-01T00:00:00+00:00",
+        "synopsis": "Science fact & science fiction",
+        "author_id": 1,
+        "author_name": "A & B",
+        "formats": ["epub"]
+    }]));
+
+    let content = state
+        .templates
+        .render("books.xml.tera", &context)
+        .expect("Failed to render books template");
+
+    assert!(content.contains("Fish &amp; Chips &lt;Special&gt;"));
+    assert!(content.contains("Science fact &amp; science fiction"));
+    assert!(content.contains("A &amp; B"));
+    assert_eq!(count_items(&content), 1);
+}
+
+#[test]
 async fn list_authors() {
     let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");

@@ -18,7 +18,7 @@ if [ -z $IMAGE_NAME ]; then
     exit 1
 fi
 
-VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' $CARGO_TOML_PATH)
+VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/"/, "", $2); printf("%s",$2) }' $CARGO_TOML_PATH)
 
 # Create and use the Buildx builder if it doesn't exist
 docker buildx inspect mybuilder > /dev/null 2>&1

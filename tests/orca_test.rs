@@ -126,7 +126,7 @@ async fn mime_types_are_not_escaped() {
         "synopsis": "Science fact & science fiction",
         "author_id": 1,
         "author_name": "O'Brien & Sons",
-        "formats": ["epub", "pdf", "mobi"]
+        "formats": ["epub", "pdf", "mobi", "cbz"]
     }]));
 
     let content = state
@@ -137,6 +137,8 @@ async fn mime_types_are_not_escaped() {
     assert!(content.contains(r#"type="application/epub+zip""#));
     assert!(content.contains(r#"type="application/pdf""#));
     assert!(content.contains(r#"type="application/x-mobipocket-ebook""#));
+    // Unrecognised formats fall back to a generic mime type.
+    assert!(content.contains(r#"type="application/octet-stream""#));
 
     // Escaping of the actual metadata still happens.
     assert!(content.contains("Fish &amp; Chips"));

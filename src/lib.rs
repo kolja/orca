@@ -10,12 +10,9 @@ pub mod pattern;
 
 use actix_web::{web, App, HttpServer};
 use rusqlite::Connection;
-use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tera::Result as TeraResult;
-use tera::Tera;
-use tera::Value;
+use tera::{Kwargs, State, Tera};
 
 use config::{Config, Protocol};
 use templates::Template;
@@ -23,19 +20,13 @@ use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, g
 use appstate::AppState;
 
 // Tera filter to convert format to mime type
-fn format_to_mime_filter(value: &Value, _: &HashMap<String, Value>) -> TeraResult<Value> {
-    let format_str = value
-        .as_str()
-        .ok_or_else(|| tera::Error::msg("Expected a string as input for format_to_mime"))?;
-
-    let mime_type = match format_str {
+fn format_to_mime_filter(format: &str, _: Kwargs, _: &State) -> &'static str {
+    match format {
         "epub" => "application/epub+zip",
         "pdf" => "application/pdf",
         "mobi" => "application/x-mobipocket-ebook",
         _ => "application/octet-stream",
-    };
-
-    Ok(json!(mime_type))
+    }
 }
 
 pub fn create_app(config: &'static Config) -> AppState {
@@ -58,6 +49,14 @@ pub fn create_app(config: &'static Config) -> AppState {
 
     let mut tera = Tera::default();
 
+    // Tera resolves filters when a template is added, so custom filters have to
+    // be registered before `add_raw_templates`.
+    tera.register_filter("format_to_mime", format_to_mime_filter);
+    // Embedded template names end in `.xml.tera`, which Tera does not
+    // auto-escape by default. Escape dynamic values so Calibre metadata such
+    // as ampersands cannot produce malformed OPDS XML.
+    tera.autoescape_on(vec![".html", ".htm", ".xml", ".xml.tera"]);
+
     let templates: Vec<(String, String)> = Template::iter()
         .map(|file| {
             let content = Template::get(&file).unwrap();
@@ -67,11 +66,6 @@ pub fn create_app(config: &'static Config) -> AppState {
         .collect();
 
     tera.add_raw_templates(templates).expect("Failed to add templates");
-    // Embedded template names end in `.xml.tera`, which Tera does not
-    // auto-escape by default. Escape dynamic values so Calibre metadata such
-    // as ampersands cannot produce malformed OPDS XML.
-    tera.autoescape_on(vec![".html", ".htm", ".xml", ".xml.tera"]);
-    tera.register_filter("format_to_mime", format_to_mime_filter);
 
     AppState {
         templates: tera,

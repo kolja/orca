@@ -51,16 +51,20 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: create-release
     strategy:
+      # Don't let one broken target cancel the others: a partial release with
+      # the assets that did build is more useful than an empty one.
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-musl
             os: ubuntu-latest
           # Linux ARM64, for Raspberry Pi and ARM-based NAS users. Also the
           # binary baked into the linux/arm64 Docker image by docker/Dockerfile.
-          # Built on a native ARM runner rather than cross-compiled, because
-          # rusqlite (bundled) and openssl (vendored) both compile C sources.
+          # Must run on an x86_64 runner: upload-rust-binary-action builds every
+          # *-linux-musl target with `cross`, and cross 0.2.5 assumes an x86_64
+          # host, so it fails on ubuntu-*-arm runners.
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04-arm
+            os: ubuntu-latest
           - target: aarch64-apple-darwin
             os: macos-latest
     runs-on: ${{ matrix.os }}

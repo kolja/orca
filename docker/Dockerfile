@@ -21,6 +21,14 @@ RUN case "$TARGETARCH" in \
 
 FROM scratch
 
+# with this, `docker inspect` can then report the real version even when pulled via a `:latest` tag.
+ARG VERSION
+LABEL org.opencontainers.image.title="orca" \
+      org.opencontainers.image.description="OPDS server for Calibre libraries" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/kolja/orca" \
+      org.opencontainers.image.licenses="MIT"
+
 COPY --from=fetch /out/orca /app/orca
 
 WORKDIR /app

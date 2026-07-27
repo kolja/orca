@@ -28,6 +28,9 @@ async fn main() -> std::io::Result<()> {
             exit(0);
         });
 
+    // report correct version to the logs even when running under `:latest` tag.
+    println!("orca v{}", env!("CARGO_PKG_VERSION"));
+
     let config = config::get();
 
     run_server(create_app(&config)).await

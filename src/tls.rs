@@ -6,17 +6,16 @@ use anyhow::{Context, Error, Result, bail};
 
 pub fn load_rustls_config(cert_path: &str, key_path: &str) -> Result<ServerConfig, Error> {
 
-    let _ = rustls::crypto::aws_lc_rs::default_provider()
-        .install_default().or_else(|_| {
-            bail!("Could not install AWS LC provider");
-        });
+    // Fails only when a provider is already installed, which is harmless: the
+    // process needs exactly one, and the tests load several configs in a row.
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
     let config = ServerConfig::builder().with_no_client_auth();
 
     let cert_file = &mut BufReader::new(File::open(cert_path)
-                                        .with_context(|| format!("Could not open cert file"))?);
+                                        .context("Could not open cert file")?);
     let key_file = &mut BufReader::new(File::open(key_path)
-                                        .with_context(|| format!("Could not open key file"))?);
+                                        .context("Could not open key file")?);
 
     let cert_chain = certs(cert_file).collect::<Result<Vec<_>, _>>().context("Could not parse certificate chain")?;
     let mut keys = pkcs8_private_keys(key_file)

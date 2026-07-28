@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn pattern_deserialize() {
         let toml_data = r#"pattern = "/baz/*""#;
-        let wrap: TestWrap = toml::from_str(&toml_data).unwrap();
+        let wrap: TestWrap = toml::from_str(toml_data).unwrap();
         assert_eq!(wrap.pattern.pattern, "/baz/*");
         assert!(wrap.pattern.regex.is_match("/baz/anything"));
         assert!(!wrap.pattern.regex.is_match("/foo/bar"));
@@ -102,7 +102,7 @@ mod tests {
     #[test]
     fn pattern_roundtrip() {
         let toml_data = r#"pattern = "/baz/*""#;
-        let wrap: TestWrap = toml::from_str(&toml_data).unwrap();
+        let wrap: TestWrap = toml::from_str(toml_data).unwrap();
         let serialized = toml::to_string(&wrap).unwrap();
         assert_eq!(toml_data.trim(), serialized.trim());
     }

@@ -38,20 +38,11 @@ pub struct Server {
     pub protocol: Protocol,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct Authentication {
     pub login: HashMap<String, String>,
     #[serde(default)]
     pub public: Vec<Pattern>,
-}
-
-impl Default for Authentication {
-    fn default() -> Self {
-        Authentication {
-            login: HashMap::new(),
-            public: vec![]
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]

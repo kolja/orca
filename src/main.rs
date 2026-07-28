@@ -16,23 +16,23 @@ struct Cli {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
 
-    // if povided: Print the hash of the login:password string and exit
+    // if provided: Print the hash of the login:password string and exit
     let args = Cli::parse();
-    args.login_password.as_ref()
+    if let Some(auth_data) = args.login_password.as_ref()
         .and_then(|login_password| {
             let (login, password) = login_password.split_once(":")?;
             hash::encode_auth_data(login, password).ok()
         })
-        .map(|auth_data| {
-            println!("{}", auth_data);
-            exit(0);
-        });
+    {
+        println!("{}", auth_data);
+        exit(0);
+    }
 
     // report correct version to the logs even when running under `:latest` tag.
     println!("orca v{}", env!("CARGO_PKG_VERSION"));
 
     let config = config::get();
 
-    run_server(create_app(&config)).await
+    run_server(create_app(config)).await
 }
 

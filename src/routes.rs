@@ -54,7 +54,7 @@ impl Format {
 }
 /// The externally visible origin of this request, as `scheme://host` without a
 /// trailing slash. `connection_info` honours X-Forwarded-Proto / X-Forwarded-Host,
-/// so this stays correct behind a reverse proxy -- could othewise be resolved to something like
+/// so this stays correct behind a reverse proxy -- could otherwise be resolved to something like
 /// 0.0.0.0
 fn origin(req: &HttpRequest, config: &Config) -> String {
     match &config.server.public_url {

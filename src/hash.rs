@@ -26,10 +26,8 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
 pub fn encode_auth_data(login: &str, password: &str) -> Result<String> {
     let hash_value = hash(login, password)?;
     Ok(format!(
-        "{}\n{} = \"{}\"",
-        "Add this to the [Authentication] section of your config.toml:",
-        login,
-        hash_value
+        "Add this to the [authentication.login] section of your config.toml:\n{} = \"{}\"",
+        login, hash_value
     ))
 }
 
@@ -43,7 +41,7 @@ mod tests {
         let password = "strongpassword";
         let hash_result = hash(login, password);
         assert!(hash_result.is_ok());
-        assert!(hash_result.unwrap().len() > 0);
+        assert!(!hash_result.unwrap().is_empty());
     }
 
     #[test]
@@ -93,7 +91,7 @@ mod tests {
         let encode_result = encode_auth_data(login, password);
         assert!(encode_result.is_ok());
         let encoded_string = encode_result.unwrap();
-        assert!(encoded_string.contains("Add this to the [Authentication] section of your config.toml:"));
+        assert!(encoded_string.contains("Add this to the [authentication.login] section of your config.toml:"));
         assert!(encoded_string.contains(login));
     }
 }

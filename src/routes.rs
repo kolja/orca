@@ -8,6 +8,7 @@ use html2text::from_read;
 use rusqlite::{params, Row};
 use crate::authorized::Authorized;
 use crate::appstate::AppState;
+use crate::config::Config;
 
 #[derive(Debug, Serialize)]
 struct Book {
@@ -51,6 +52,33 @@ impl Format {
         }
     }
 }
+/// The externally visible origin of this request, as `scheme://host` without a
+/// trailing slash. `connection_info` honours X-Forwarded-Proto / X-Forwarded-Host,
+/// so this stays correct behind a reverse proxy -- could othewise be resolved to something like
+/// 0.0.0.0
+fn origin(req: &HttpRequest, config: &Config) -> String {
+    match &config.server.public_url {
+        Some(url) => url.trim_end_matches('/').to_string(),
+        None => {
+            let conn = req.connection_info();
+            format!("{}://{}", conn.scheme(), conn.host())
+        }
+    }
+}
+
+/// Context common to every feed: the config plus the absolute URL of this feed
+/// for `<link rel="self">`. Some clients resolve the relative
+/// hrefs of entries against the self link rather than against the URL they
+/// fetched, so the self link has to be both absolute and per-request.
+fn feed_ctx(req: &HttpRequest, config: &Config) -> tera::Context {
+    let mut ctx = tera::Context::new();
+    let origin = origin(req, config);
+    ctx.insert("self_url", &format!("{}{}", origin, req.path()));
+    ctx.insert("base", &origin);
+    ctx.insert("config", config);
+    ctx
+}
+
 fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> HttpResponse {
     match template.render(name, &ctx) {
         Ok(body) => HttpResponse::Ok()
@@ -160,9 +188,7 @@ async fn book_file(
 }
 
 #[actix_web::get("/")]
-async fn index(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) -> impl Responder {
-    let mut ctx = tera::Context::new();
-
+async fn index(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest) -> impl Responder {
     let libraries: Vec<String> = data.db.keys().cloned().collect();
 
     if libraries.len() == 1 {
@@ -172,7 +198,7 @@ async fn index(data: web::Data<AppState>, _auth: Authorized, _req: HttpRequest) 
             .finish();
     }
 
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("libraries", &libraries);
     render_template(&data.templates, "index.xml.tera", ctx)
 }
@@ -182,12 +208,11 @@ async fn opds(
     data: web::Data<AppState>,
     path: web::Path<String>,
     _auth: Authorized,
-    _req: HttpRequest,
+    req: HttpRequest,
 ) -> impl Responder {
-    let mut ctx = tera::Context::new();
     let lib = path.into_inner();
 
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
     render_template(&data.templates, "opds.xml.tera", ctx)
 }
@@ -197,16 +222,15 @@ async fn tags(
     data: web::Data<AppState>,
     path: web::Path<String>,
     _auth: Authorized,
-    _req: HttpRequest,
+    req: HttpRequest,
 ) -> impl Responder {
-    let mut ctx = tera::Context::new();
     let lib = path.into_inner();
     let db = match data.db.get(&lib) {
         Some(db) => db.lock().unwrap(),
         None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
     };
 
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
 
     let mut stmt = db
@@ -232,11 +256,10 @@ async fn books_by_tag(
     data: web::Data<AppState>,
     path: web::Path<(String, i32)>,
     _auth: Authorized,
-    _req: HttpRequest,
+    req: HttpRequest,
 ) -> impl Responder {
     let (lib, tag_id) = path.into_inner();
-    let mut ctx = tera::Context::new();
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
 
     let db = match data.db.get(&lib) {
@@ -288,12 +311,11 @@ async fn authors(
     data: web::Data<AppState>,
     path: web::Path<String>,
     _auth: Authorized,
-    _req: HttpRequest,
+    req: HttpRequest,
 ) -> impl Responder {
-    let mut ctx = tera::Context::new();
     let lib = path.into_inner();
 
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
 
     let db = match data.db.get(&lib) {
@@ -325,11 +347,10 @@ async fn books_by_author(
     data: web::Data<AppState>,
     author_id: web::Path<(String, i32)>,
     _auth: Authorized,
-    _req: HttpRequest,
+    req: HttpRequest,
 ) -> impl Responder {
     let (lib, author_id) = author_id.into_inner();
-    let mut ctx = tera::Context::new();
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
 
     let db = match data.db.get(&lib) {
@@ -381,12 +402,11 @@ async fn getbooks(
     data: web::Data<AppState>,
     path: web::Path<String>,
     _auth: Authorized,
-    _req: HttpRequest,
+    req: HttpRequest,
 ) -> impl Responder {
-    let mut ctx = tera::Context::new();
     let lib = path.into_inner();
 
-    ctx.insert("config", &data.config);
+    let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
 
     let db = match data.db.get(&lib) {

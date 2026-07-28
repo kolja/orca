@@ -91,6 +91,8 @@ async fn book_metadata_is_xml_escaped() {
     let mut context = tera::Context::new();
     context.insert("config", &state.config);
     context.insert("lib", "library");
+    context.insert("base", "http://localhost:8888");
+    context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips <Special>",
@@ -119,6 +121,8 @@ async fn mime_types_are_not_escaped() {
     let mut context = tera::Context::new();
     context.insert("config", &state.config);
     context.insert("lib", "library");
+    context.insert("base", "http://localhost:8888");
+    context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips",
@@ -231,6 +235,47 @@ async fn download_epub() {
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
     assert_eq!(resp.headers().get("content-type").unwrap(), "application/epub+zip");
+}
+
+// The self link must name the host the client actually reached, never the bind
+// address: clients like Moon+ Reader resolve entry links against it, and a
+// wildcard bind (0.0.0.0) is not connectable from anywhere.
+#[test]
+async fn self_link_follows_forwarded_headers() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/tags")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .insert_header(("X-Forwarded-Proto", "https"))
+        .insert_header(("X-Forwarded-Host", "orca.example.com"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(content.contains(r#"rel="self" href="https://orca.example.com/library/tags""#));
+    assert!(content.contains(r#"rel="start" href="https://orca.example.com/""#));
+    assert!(!content.contains("0.0.0.0"));
+}
+
+// Without a proxy the Host header is the only thing the client can reach us by.
+#[test]
+async fn self_link_falls_back_to_host_header() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .insert_header((header::HOST, "books.local:8888"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(content.contains(r#"rel="self" href="http://books.local:8888/library""#));
 }
 
 // ------- Https Tests -------

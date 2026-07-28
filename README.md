@@ -41,6 +41,7 @@ port = 8080
 protocol = "Https" # or "Http"
 cert = "/path/to/cert.pem"
 key = "/path/to/key.pem"
+public_url = "https://orca.example.com" # optional, see below
 
 [authentication.login]
 alice = "$argon2id$v=19$m=19456,t=2,p=1$bK0qYfzAokhthFP0fKBQvg$QPPf54SN74dT2YX4aGoN+KxoWD+xV+c6OBrrPnvxj24"
@@ -53,7 +54,6 @@ public = ["/", "/library/**"] # the root endpoint is publicly accessible, so is 
 library = "/Volumes/library"
 nonfiction = "/Volumes/nonfiction"
 ```
-
 ## Authentication
 
 The server supports basic authentication: You can generate a password hash like so:
@@ -63,6 +63,16 @@ orca --hash <login>:<password> # e.g. orca --hash alice:secretpassword
 The server will print the hash which you have to copy to the `[authentication.login]` section of your config file.
 
 Under the `public` array in the `[authentication]` section you can specify which paths should be accessible without authentication. You can use wildcards like `*` and `**` to match multiple paths.
+
+## Running behind a reverse proxy
+
+Every feed advertises its own address in `<link rel="self">`. 
+Some OPDS clients will resolve links against that self link instead of against the URL they fetched — which is not necessarily the address Orca binds to.
+
+Orca derives it from the request, honouring `X-Forwarded-Proto` and `X-Forwarded-Host`, so a proxy that sets those headers needs no extra configuration. 
+
+If your proxy cannot set them, set `public_url` in the `[server]` section to the
+externally visible base URL. It will take precedence over the headers.
 
 ## Development
 

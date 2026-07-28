@@ -29,6 +29,11 @@ pub enum Protocol {
 pub struct Server {
     pub ip: String,
     pub port: u16,
+    /// Externally visible base URL, e.g. "https://orca.example.com". Only needed
+    /// when the reverse proxy in front of Orca does not set X-Forwarded-Proto /
+    /// X-Forwarded-Host; otherwise feeds derive their own URL from the request.
+    #[serde(default)]
+    pub public_url: Option<String>,
     #[serde(flatten)]
     pub protocol: Protocol,
 }

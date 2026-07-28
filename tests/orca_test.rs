@@ -237,6 +237,44 @@ async fn download_epub() {
     assert_eq!(resp.headers().get("content-type").unwrap(), "application/epub+zip");
 }
 
+// A book id that is not in the database must be a 404.
+#[test]
+async fn missing_ids_return_404_and_leave_the_library_usable() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let auth = || (header::AUTHORIZATION, format!("Basic {}", credentials));
+
+    for uri in ["/library/cover/99999", "/library/file/99999/epub"] {
+        let req = test::TestRequest::with_uri(uri).insert_header(auth()).to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{} should be 404", uri);
+    }
+
+    let req = test::TestRequest::with_uri("/library/books").insert_header(auth()).to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "library unusable after a missing-id request");
+}
+
+// Tags and authors that match nothing are an empty feed, not an error.
+#[test]
+async fn unmatched_queries_render_an_empty_feed() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for uri in ["/library/tags/99999", "/library/authors/99999"] {
+        let req = test::TestRequest::with_uri(uri)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "{} should succeed", uri);
+
+        let body = test::read_body(resp).await;
+        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+        assert!(is_opds(&content));
+        assert_eq!(count_items(&content), 0, "{} should have no entries", uri);
+    }
+}
+
 // The self link must name the host the client actually reached, never the bind
 // address: clients like Moon+ Reader resolve entry links against it, and a
 // wildcard bind (0.0.0.0) is not connectable from anywhere.

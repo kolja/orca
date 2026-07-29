@@ -390,7 +390,37 @@ async fn self_link_falls_back_to_host_header() {
     assert!(content.contains(r#"rel="self" href="http://books.local:8888/library""#));
 }
 
+// With a single library there is nothing to choose from, so the root sends the
+// client straight to it instead of showing a one-entry catalog.
+#[test]
+async fn single_library_redirects_to_it() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+
+    assert_eq!(resp.status(), StatusCode::FOUND);
+    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/library");
+}
+
 // ------- Https Tests -------
+
+// The https config registers tests/calibre twice, so the root is a real
+// catalog listing every library rather than a redirect.
+#[test]
+async fn multiple_libraries_are_listed() {
+    let app = setup(Https).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/", &credentials).await;
+
+    assert!(is_opds(&content));
+    assert_eq!(count_items(&content), 2);
+    assert!(content.contains("<title>library</title>"));
+    assert!(content.contains("<title>library2</title>"));
+    assert!(content.contains(r#"href="/library2""#));
+}
 
 #[test]
 async fn unauthorized_request_https() {

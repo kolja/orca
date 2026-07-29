@@ -12,5 +12,9 @@ alice = "$argon2id$v=19$m=19456,t=2,p=1$G57mIrlohNqdISyznvXyhw$qNaLVhDp+FJfK38Df
 [authentication]
 public = ["/health"]
 
+# Two entries for the same directory: Orca keys libraries by config name, so
+# this is a second library as far as the server is concerned. It lets the tests
+# cover the multi-library index, which the single-library http config cannot.
 [calibre.libraries]
 library = "tests/calibre"
+library2 = "tests/calibre"

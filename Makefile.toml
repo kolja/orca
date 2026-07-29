@@ -1,3 +1,9 @@
+[tasks.coverage-check]
+description = "Run tests under tarpaulin; fail if any file lost coverage"
+script = [
+  "./scripts/coverage.sh ${@}"
+]
+
 [tasks.docker-build]
 description = "Build and push Docker image"
 script = [

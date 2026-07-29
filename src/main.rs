@@ -33,6 +33,11 @@ async fn main() -> std::io::Result<()> {
 
     let config = config::get();
 
-    run_server(create_app(config)).await
+    let state = create_app(config).unwrap_or_else(|e| {
+        eprintln!("Could not start: {}", e);
+        exit(1);
+    });
+
+    run_server(state).await
 }
 

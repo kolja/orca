@@ -26,7 +26,7 @@ async fn setup(protocol: Protocol) -> impl Service<Request, Response = ServiceRe
     let state = match protocol {
         Http => create_app(&TEST_HTTP_CONFIG),
         Https => create_app(&TEST_HTTPS_CONFIG),
-    };
+    }.expect("Failed to create app");
     test::init_service(
             App::new()
                 .app_data(web::Data::new(state))
@@ -87,7 +87,7 @@ async fn list_books() {
 
 #[test]
 async fn book_metadata_is_xml_escaped() {
-    let state = create_app(&TEST_HTTP_CONFIG);
+    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
     let mut context = tera::Context::new();
     context.insert("config", &state.config);
     context.insert("lib", "library");
@@ -116,7 +116,7 @@ async fn book_metadata_is_xml_escaped() {
 // Auto-escaping would otherwise encode the `/` in mime types as `&#x2F;`.
 #[test]
 async fn mime_types_are_not_escaped() {
-    let state = create_app(&TEST_HTTP_CONFIG);
+    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
     let mut context = tera::Context::new();
     context.insert("config", &state.config);
     context.insert("lib", "library");

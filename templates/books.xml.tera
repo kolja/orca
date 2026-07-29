@@ -14,10 +14,12 @@
   <link href="/{{ lib }}/file/{{ book.id }}/{{ format }}" type="{{ format | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format }}"/>
     {% endfor %}
     <content type="text">{{ book.synopsis }}</content>
+    {% for author in book.authors %}
     <author>
-      <name>{{ book.author_name }}</name>
-      <uri>/author/{{ book.author_id }}</uri>
+      <name>{{ author.name }}</name>
+      <uri>/{{ lib }}/authors/{{ author.id }}</uri>
     </author>
+    {% endfor %}
   <published>{{ book.pubdate }}</published>
   </entry>
   {% endfor %}

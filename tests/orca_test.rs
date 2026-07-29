@@ -82,7 +82,7 @@ async fn list_books() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert_eq!(count_items(&content), 3);
+    assert_eq!(count_items(&content), 4);
 }
 
 #[test]
@@ -98,8 +98,7 @@ async fn book_metadata_is_xml_escaped() {
         "title": "Fish & Chips <Special>",
         "pubdate": "2026-01-01T00:00:00+00:00",
         "synopsis": "Science fact & science fiction",
-        "author_id": 1,
-        "author_name": "A & B",
+        "authors": [{"id": 1, "name": "A & B"}],
         "formats": ["epub"]
     }]));
 
@@ -128,8 +127,7 @@ async fn mime_types_are_not_escaped() {
         "title": "Fish & Chips",
         "pubdate": "2026-01-01T00:00:00+00:00",
         "synopsis": "Science fact & science fiction",
-        "author_id": 1,
-        "author_name": "O'Brien & Sons",
+        "authors": [{"id": 1, "name": "O'Brien & Sons"}],
         "formats": ["epub", "pdf", "mobi", "cbz"]
     }]));
 
@@ -162,7 +160,7 @@ async fn list_authors() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert_eq!(count_items(&content), 3);
+    assert_eq!(count_items(&content), 5);
 }
 
 #[test]
@@ -237,6 +235,20 @@ async fn download_epub() {
     assert_eq!(resp.headers().get("content-type").unwrap(), "application/epub+zip");
 }
 
+#[test]
+async fn download_mobi() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/file/6/mobi")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    assert_eq!(&body[60..68], b"BOOKMOBI");
+}
+
 // A book id that is not in the database must be a 404.
 #[test]
 async fn missing_ids_return_404_and_leave_the_library_usable() {
@@ -273,6 +285,68 @@ async fn unmatched_queries_render_an_empty_feed() {
         assert!(is_opds(&content));
         assert_eq!(count_items(&content), 0, "{} should have no entries", uri);
     }
+}
+
+// A library that is not configured is a 404
+#[test]
+async fn unknown_library_is_not_found() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for uri in ["/nosuchlib", "/nosuchlib/books", "/nosuchlib/tags",
+                "/nosuchlib/authors", "/nosuchlib/tags/5", "/nosuchlib/authors/5",
+                "/nosuchlib/cover/5", "/nosuchlib/file/5/epub"] {
+        let req = test::TestRequest::with_uri(uri)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{} should be 404", uri);
+    }
+}
+
+// One acquisition link per format
+#[test]
+async fn each_format_is_offered_exactly_once() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    // Book 6 has two authors and two formats; book 4 has three tags.
+    for uri in ["/library/books", "/library/authors/6", "/library/authors/7"] {
+        let content = body_of(&app, uri, &credentials).await;
+        assert_eq!(count_links(&content, "/library/file/6/epub"), 1, "{}", uri);
+        assert_eq!(count_links(&content, "/library/file/6/mobi"), 1, "{}", uri);
+    }
+
+    for uri in ["/library/books", "/library/authors/4", "/library/tags/5"] {
+        let content = body_of(&app, uri, &credentials).await;
+        assert_eq!(count_links(&content, "/library/file/4/epub"), 1, "{}", uri);
+    }
+}
+
+#[test]
+async fn untagged_books_still_appear_in_author_feeds() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/authors/6", &credentials).await;
+    assert_eq!(count_items(&content), 1);
+    assert!(content.contains("The sidereal messenger of Galileo Galilei"));
+}
+
+// A co-authored book is one entry that credits everyone, not one entry per
+// author and not an arbitrary single author.
+#[test]
+async fn co_authored_books_list_every_author() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/books", &credentials).await;
+    assert_eq!(count_items(&content), 4, "the co-authored book must not be duplicated");
+    assert!(content.contains("<name>Galileo Galilei</name>"));
+    assert!(content.contains("<name>Johannes Kepler</name>"));
+    // Author links must point at a route that exists.
+    assert!(content.contains("<uri>/library/authors/6</uri>"));
+    assert!(!content.contains("<uri>/author/"));
 }
 
 // The self link must name the host the client actually reached, never the bind
@@ -377,6 +451,24 @@ fn is_opds(content: &str) -> bool {
             _ => buf.clear(),
         }
     }
+}
+
+async fn body_of(
+    app: &impl Service<Request, Response = ServiceResponse, Error = actix_web::Error>,
+    uri: &str,
+    credentials: &str,
+) -> String {
+    let req = test::TestRequest::with_uri(uri)
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(app, req).await;
+    assert!(resp.status().is_success(), "{} should succeed", uri);
+    let body = test::read_body(resp).await;
+    String::from_utf8(body.to_vec()).expect("Failed to convert to String")
+}
+
+fn count_links(content: &str, href: &str) -> usize {
+    content.matches(&format!(r#"href="{}""#, href)).count()
 }
 
 fn count_items(content: &str) -> usize {

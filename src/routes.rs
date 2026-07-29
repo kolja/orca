@@ -5,7 +5,8 @@ use actix_files as fs;
 use tera::Tera;
 use serde_derive::Serialize;
 use html2text::from_read;
-use rusqlite::{params, Connection, Row};
+use rusqlite::{params, params_from_iter, Connection, Row};
+use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
 use crate::authorized::Authorized;
 use crate::appstate::AppState;
@@ -17,10 +18,8 @@ struct Book {
     title: String,
     pubdate: String,
     synopsis: String,
-    author_id: i32,
-    author_name: String,
-    book_file: Option<String>,
     formats: Vec<Format>,
+    authors: Vec<Author>,
 }
 
 #[derive(Debug, Serialize)]
@@ -103,6 +102,10 @@ fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>, what: &str) 
     .collect()
 }
 
+/// The columns every book feed needs
+const BOOK_COLUMNS: &str = "b.id, b.title, b.pubdate, c.text AS synopsis,
+    (SELECT GROUP_CONCAT(format) FROM data WHERE book = b.id) AS formats";
+
 /// Run one of the book queries and map its rows to `Book`s.
 fn query_books(
     db: &Connection,
@@ -111,22 +114,61 @@ fn query_books(
 ) -> rusqlite::Result<Vec<Book>> {
     let mut stmt = db.prepare(sql)?;
     let rows = stmt.query_map(params, |row| {
-        let synopsis: String = row.get(3).unwrap_or_default();
+        let synopsis: String = row.get("synopsis").unwrap_or_default();
         let synopsis = from_read(synopsis.as_bytes(), 100).unwrap_or_default();
         let format_str: String = row.get("formats").unwrap_or_default();
         let formats = format_str.split(',').filter_map(Format::from_str).collect();
         Ok(Book {
-            id: row.get(0)?,
-            title: row.get(1)?,
-            pubdate: row.get(2)?,
+            id: row.get("id")?,
+            title: row.get("title")?,
+            pubdate: row.get("pubdate")?,
             synopsis,
-            author_name: row.get(4)?,
-            author_id: row.get(5)?,
-            book_file: row.get(6)?,
             formats,
+            authors: Vec::new(),
         })
     })?;
-    Ok(collect_rows(rows, "book"))
+
+    let mut books = collect_rows(rows, "book");
+    let book_ids: Vec<i32> = books.iter().map(|book| book.id).collect();
+    let mut by_book = authors_by_book(db, &book_ids)?;
+    for book in &mut books {
+        book.authors = by_book.remove(&book.id).unwrap_or_default();
+    }
+    Ok(books)
+}
+
+/// The authors of each of the given books, by book id. 
+/// Books are joined to their authors in a separate query
+fn authors_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMap<i32, Vec<Author>>> {
+    if book_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let placeholders = vec!["?"; book_ids.len()].join(",");
+    let mut stmt = db.prepare(&format!(
+        "SELECT ba.book, a.id, a.name
+            FROM books_authors_link ba
+            JOIN authors a ON ba.author = a.id
+            WHERE ba.book IN ({})
+            ORDER BY ba.book, a.sort;",
+        placeholders
+    ))?;
+
+    let rows = stmt.query_map(params_from_iter(book_ids), |row| {
+        Ok((
+            row.get::<_, i32>(0)?,
+            Author {
+                id: row.get(1)?,
+                name: row.get(2)?,
+            },
+        ))
+    })?;
+
+    let mut by_book: HashMap<i32, Vec<Author>> = HashMap::new();
+    for (book, author) in collect_rows(rows, "book author") {
+        by_book.entry(book).or_default().push(author);
+    }
+    Ok(by_book)
 }
 
 fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> HttpResponse {
@@ -276,6 +318,9 @@ async fn opds(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
+    if !data.db.contains_key(&lib) {
+        return HttpResponse::NotFound().body(format!("Database '{}' not found", lib));
+    }
 
     let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
@@ -336,16 +381,14 @@ async fn books_by_tag(
 
     let books_by_tag = query_books(
         &db,
-        "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id, d.name AS book_file,
-            GROUP_CONCAT(d.format) AS formats
-            FROM books b
-            JOIN books_tags_link bt ON b.id = bt.book
-            JOIN tags t ON bt.tag = t.id
-            JOIN books_authors_link ba ON b.id = ba.book
-            JOIN authors a ON ba.author = a.id
-            LEFT JOIN comments c ON b.id = c.book
-            LEFT JOIN data d ON b.id = d.book
-            WHERE t.id = ?1 GROUP BY b.id;",
+        &format!(
+            "SELECT {}
+                FROM books b
+                JOIN books_tags_link bt ON b.id = bt.book
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE bt.tag = ?1 GROUP BY b.id;",
+            BOOK_COLUMNS
+        ),
         params![tag_id],
     );
     let books_by_tag = match books_by_tag {
@@ -413,16 +456,14 @@ async fn books_by_author(
 
     let books_by_author = query_books(
         &db,
-        "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id, d.name AS book_file,
-            GROUP_CONCAT(d.format) AS formats
-            FROM books b
-            JOIN books_tags_link bt ON b.id = bt.book
-            JOIN tags t ON bt.tag = t.id
-            JOIN books_authors_link ba ON b.id = ba.book
-            JOIN authors a ON ba.author = a.id
-            LEFT JOIN comments c ON b.id = c.book
-            LEFT JOIN data d ON b.id = d.book
-            WHERE a.id = ?1 GROUP BY b.id;",
+        &format!(
+            "SELECT {}
+                FROM books b
+                JOIN books_authors_link ba ON b.id = ba.book
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE ba.author = ?1 GROUP BY b.id;",
+            BOOK_COLUMNS
+        ),
         params![author_id],
     );
     let books_by_author = match books_by_author {
@@ -453,13 +494,12 @@ async fn getbooks(
 
     let books = query_books(
         &db,
-        "SELECT b.id, b.title, b.pubdate, c.text AS synopsis, a.name AS author_name, a.id AS author_id, d.name AS book_file,
-        GROUP_CONCAT(d.format) AS formats
-        FROM books b
-        JOIN books_authors_link ba ON b.id = ba.book
-        JOIN authors a ON ba.author = a.id
-        LEFT JOIN comments c ON b.id = c.book
-        LEFT JOIN data d ON b.id = d.book GROUP BY b.id;",
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book;",
+            BOOK_COLUMNS
+        ),
         params![],
     );
     let books = match books {

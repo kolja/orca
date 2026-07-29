@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">6</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">c1a4f0de-2f6e-4b3a-9c15-46036e5a1610</dc:identifier>
+        <dc:title>The sidereal messenger of Galileo Galilei</dc:title>
+        <dc:creator opf:file-as="Galilei, Galileo" opf:role="aut">Galileo Galilei</dc:creator>
+        <dc:creator opf:file-as="Kepler, Johannes" opf:role="aut">Johannes Kepler</dc:creator>
+        <dc:contributor opf:file-as="Carlos, Edward Stafford" opf:role="trl">Edward Stafford Carlos</dc:contributor>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">calibre (7.22.0) [https://calibre-ebook.com]</dc:contributor>
+        <dc:date>2014-06-19T00:00:00+00:00</dc:date>
+        <dc:description>&lt;div&gt;
+&lt;p&gt;&lt;a href=&quot;https://en.wikipedia.org/wiki/Sidereus_Nuncius&quot;&gt;&lt;span style=&quot;color: #6cb4ee&quot;&gt;Sidereus Nuncius&lt;/span&gt;&lt;/a&gt; (usually &lt;em&gt;Sidereal Messenger&lt;/em&gt;, also &lt;em&gt;Starry Messenger&lt;/em&gt;) is a short astronomical treatise published in New Latin by &lt;a href=&quot;https://en.wikipedia.org/wiki/Galileo_Galilei&quot;&gt;&lt;span style=&quot;color: #6cb4ee&quot;&gt;Galileo Galilei&lt;/span&gt;&lt;/a&gt; on March 13, 1610. It was the first published scientific work based on observations made through a &lt;a href=&quot;https://en.wikipedia.org/wiki/Telescope&quot;&gt;&lt;span style=&quot;color: #6cb4ee&quot;&gt;telescope&lt;/span&gt;&lt;/a&gt;, and it contains the results of Galileo&#x27;s early observations of the imperfect and mountainous Moon, the hundreds of stars that were unable to be seen in either the &lt;a href=&quot;https://en.wikipedia.org/wiki/Milky_Way&quot;&gt;&lt;span style=&quot;color: #6cb4ee&quot;&gt;Milky Way&lt;/span&gt;&lt;/a&gt; or certain constellations with the naked eye, and the &lt;a href=&quot;https://en.wikipedia.org/wiki/Galilean_moons&quot;&gt;&lt;span style=&quot;color: #6cb4ee&quot;&gt;Medicean Stars&lt;/span&gt;&lt;/a&gt; that appeared to be circling Jupiter.&lt;/p&gt;
+&lt;p&gt;This 1880 English translation by Edward Stafford Carlos also contains a part of the preface to &lt;a href=&quot;https://en.wikipedia.org/wiki/Johannes_Kepler&quot;&gt;&lt;span style=&quot;color: #6cb4ee&quot;&gt;Kepler&lt;/span&gt;&lt;/a&gt;&#x27;s &lt;em&gt;Dioptrice&lt;/em&gt;.&lt;/p&gt;&lt;/div&gt;</dc:description>
+        <dc:publisher>Gutenberg Project</dc:publisher>
+        <dc:identifier opf:scheme="URI">https://www.gutenberg.org/ebooks/46036</dc:identifier>
+        <dc:language>eng</dc:language>
+        <meta name="calibre:timestamp" content="2026-07-28T19:57:00+00:00"/>
+        <meta name="calibre:title_sort" content="sidereal messenger of Galileo Galilei, The"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>

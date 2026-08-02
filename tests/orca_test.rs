@@ -171,6 +171,71 @@ async fn feed_ids_ignore_the_deployment() {
     assert!(content.contains("<id>urn:orca:library:books</id>"));
 }
 
+// Newest first, by the date the book entered the library.
+#[test]
+async fn recently_added_lists_the_newest_arrivals_first() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/new")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(content.contains("<title>library | Recently Added</title>"));
+    assert_eq!(count_items(&content), 4);
+
+    // Galileo was added 2026-07-28, Carroll's timestamp is back in 1865.
+    let order: Vec<usize> = ["Galilei", "Kant", "Толстой", "Carroll"]
+        .iter()
+        .map(|name| content.find(name).unwrap_or_else(|| panic!("{} missing", name)))
+        .collect();
+    let mut sorted = order.clone();
+    sorted.sort_unstable();
+    assert_eq!(order, sorted, "books are not ordered newest first");
+}
+
+// A feed of books is an acquisition feed; only a feed of other feeds is a
+// navigation feed. Clients use `kind` to decide which of the two to render.
+#[test]
+async fn feeds_of_books_are_advertised_as_acquisition_feeds() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for (path, href) in [
+        ("/library", "/library/books"),
+        ("/library", "/library/new"),
+        ("/library/authors", "/library/authors/5"),
+        ("/library/tags", "/library/tags/5"),
+    ] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+        let link = content
+            .split(&format!("href=\"{}\"", href))
+            .nth(1)
+            .unwrap_or_else(|| panic!("{} has no link to {}", path, href))
+            .split("/>")
+            .next()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            link.contains("kind=acquisition"),
+            "the link from {} to {} should be an acquisition feed, got:{}",
+            path,
+            href,
+            link
+        );
+    }
+}
+
 // RFC 4287 §3.3: 'T' must separate date and time
 #[test]
 async fn dates_are_rfc3339() {
@@ -252,6 +317,7 @@ async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
     context.insert("updated", "2026-01-01T00:00:00+00:00");
+    context.insert("feed_title", "library | 1 books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "uuid": "",
@@ -281,6 +347,7 @@ async fn book_metadata_is_xml_escaped() {
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
     context.insert("updated", "2026-01-01T00:00:00+00:00");
+    context.insert("feed_title", "library | 1 books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips <Special>",
@@ -313,6 +380,7 @@ async fn mime_types_are_not_escaped() {
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
     context.insert("updated", "2026-01-01T00:00:00+00:00");
+    context.insert("feed_title", "library | 1 books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips",

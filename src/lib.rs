@@ -18,7 +18,7 @@ use tera::{Kwargs, State, Tera};
 
 use config::{Config, Protocol};
 use templates::Template;
-use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, tags};
+use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, recently_added, tags};
 use appstate::AppState;
 
 // Tera filter to convert format to mime type
@@ -140,6 +140,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(tags);
     cfg.service(authors);
     cfg.service(getbooks);
+    cfg.service(recently_added);
     cfg.service(book_file);
     cfg.service(cover);
     cfg.service(books_by_tag);

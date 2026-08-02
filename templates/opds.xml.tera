@@ -22,9 +22,17 @@
   <entry>
     <title>All Books</title>
     <id>urn:orca:{{ lib }}:books</id>
-  <link href="/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link href="/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
     <updated>{{ updated }}</updated>
     <content type="text">All Books (Titles)</content>
+  </entry>
+
+  <entry>
+    <title>Recently Added</title>
+    <id>urn:orca:{{ lib }}:new</id>
+  <link href="/{{ lib }}/new" rel="http://opds-spec.org/sort/new" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+    <updated>{{ updated }}</updated>
+    <content type="text">The newest additions to the library</content>
   </entry>
 {% endblock content %}
 

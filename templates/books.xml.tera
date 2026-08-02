@@ -2,7 +2,7 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
 
-<title>{{ lib }} | {{ books | length() }} books</title>
+<title>{{ feed_title }}</title>
 
   {% for book in books %}
   <entry>

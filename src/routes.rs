@@ -125,6 +125,9 @@ fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>, what: &str) 
     .collect()
 }
 
+/// How many books are listed in the "Recently Added" category.
+const RECENTLY_ADDED: usize = 50;
+
 /// The columns every book feed needs
 const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format) FROM data WHERE book = b.id) AS formats";
@@ -433,6 +436,7 @@ async fn books_by_tag(
     };
 
     ctx.insert("books", &books_by_tag);
+    ctx.insert("feed_title", &format!("{} | {} books", lib, books_by_tag.len()));
     ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "books.xml.tera", ctx)
 }
@@ -510,6 +514,7 @@ async fn books_by_author(
     };
 
     ctx.insert("books", &books_by_author);
+    ctx.insert("feed_title", &format!("{} | {} books", lib, books_by_author.len()));
     ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "books.xml.tera", ctx)
 }
@@ -547,6 +552,48 @@ async fn getbooks(
     };
 
     ctx.insert("books", &books);
+    ctx.insert("feed_title", &format!("{} | {} books", lib, books.len()));
+    ctx.insert("updated", &library_updated(&db));
+
+    render_template(&data.templates, "books.xml.tera", ctx)
+}
+
+/// `timestamp`: when a book entered the library
+/// sorting by `last_modified` would show all the books that were just retagged (for example).
+#[actix_web::get("{lib}/new")]
+async fn recently_added(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let mut ctx = feed_ctx(&req, data.config);
+    ctx.insert("lib", &lib);
+
+    let db = match data.db.get(&lib) {
+        Some(db) => lock_db(db),
+        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    };
+
+    let books = query_books(
+        &db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book
+                ORDER BY b.timestamp DESC LIMIT {};",
+            BOOK_COLUMNS, RECENTLY_ADDED
+        ),
+        params![],
+    );
+    let books = match books {
+        Ok(books) => books,
+        Err(e) => return server_error("Error querying books", e),
+    };
+
+    ctx.insert("books", &books);
+    ctx.insert("feed_title", &format!("{} | Recently Added", lib));
     ctx.insert("updated", &library_updated(&db));
 
     render_template(&data.templates, "books.xml.tera", ctx)

@@ -171,6 +171,77 @@ async fn feed_ids_ignore_the_deployment() {
     assert!(content.contains("<id>urn:orca:library:books</id>"));
 }
 
+// RFC 4287 §3.3: 'T' must separate date and time
+#[test]
+async fn dates_are_rfc3339() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/books")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    // Alice in Wonderland: pubdate 2008-06-27, last_modified 2024-11-30.
+    assert!(content.contains("<published>2008-06-27T00:00:00+00:00</published>"));
+    assert!(content.contains("<updated>2024-11-30T10:26:17.544488+00:00</updated>"));
+
+    // No date anywhere in the feed may keep Calibre's space separator.
+    for tag in ["published", "updated"] {
+        for tail in content.split(&format!("<{}>", tag)).skip(1) {
+            let value = tail.split('<').next().unwrap_or_default();
+            assert!(!value.contains(' '), "<{}>{}</{}> is not RFC 3339", tag, value, tag);
+        }
+    }
+}
+
+// The feed is as fresh as the most recently touched book in the library.
+#[test]
+async fn feeds_report_the_latest_change_in_the_library() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    // Galileo, id 6, is the most recently modified book: 2026-07-28.
+    for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+        assert!(
+            content.contains("<updated>2026-07-28T19:57:00.000000+00:00</updated>"),
+            "{} should report the library's latest change",
+            path
+        );
+    }
+}
+
+// Atom requires an <updated> on every entry, not just on the feed.
+#[test]
+async fn every_entry_carries_an_updated() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+        assert_eq!(
+            content.matches("<updated>").count(),
+            count_items(&content) + 1,
+            "{} should carry an <updated> on the feed and on every entry",
+            path
+        );
+    }
+}
+
 #[test]
 async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
@@ -180,11 +251,13 @@ async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
     context.insert("base", "http://localhost:8888");
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
+    context.insert("updated", "2026-01-01T00:00:00+00:00");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "uuid": "",
         "title": "A Book From The Before Times",
         "pubdate": "2026-01-01T00:00:00+00:00",
+        "updated": "2026-01-01T00:00:00+00:00",
         "synopsis": "",
         "authors": [],
         "formats": ["epub"]
@@ -207,10 +280,12 @@ async fn book_metadata_is_xml_escaped() {
     context.insert("base", "http://localhost:8888");
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
+    context.insert("updated", "2026-01-01T00:00:00+00:00");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips <Special>",
         "pubdate": "2026-01-01T00:00:00+00:00",
+        "updated": "2026-01-01T00:00:00+00:00",
         "synopsis": "Science fact & science fiction",
         "authors": [{"id": 1, "name": "A & B"}],
         "formats": ["epub"]
@@ -237,10 +312,12 @@ async fn mime_types_are_not_escaped() {
     context.insert("base", "http://localhost:8888");
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
+    context.insert("updated", "2026-01-01T00:00:00+00:00");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips",
         "pubdate": "2026-01-01T00:00:00+00:00",
+        "updated": "2026-01-01T00:00:00+00:00",
         "synopsis": "Science fact & science fiction",
         "authors": [{"id": 1, "name": "O'Brien & Sons"}],
         "formats": ["epub", "pdf", "mobi", "cbz"]

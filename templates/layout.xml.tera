@@ -2,6 +2,7 @@
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
   <author> <name>Kolja</name> </author>
   <id>{{ feed_id }}</id>
+  <updated>{{ updated }}</updated>
   <link rel="self" href="{{ self_url }}" type="application/atom+xml;profile=opds-catalog" />
   <link rel="start" href="{{ base }}/" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
   {% block content %}{% endblock content %}

@@ -9,6 +9,7 @@
     <title>{{ tag.name }}</title>
     <id>urn:orca:{{ lib }}:tag:{{ tag.id }}</id>
   <link href="/{{ lib }}/tags/{{ tag.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
     <content type="text">Books tagged {{ tag.name }}</content>
   </entry>
   {% endfor %}

@@ -18,6 +18,7 @@ struct Book {
     uuid: String,
     title: String,
     pubdate: String,
+    updated: String,
     synopsis: String,
     formats: Vec<Format>,
     authors: Vec<Author>,
@@ -67,6 +68,22 @@ fn origin(req: &HttpRequest, config: &Config) -> String {
     }
 }
 
+/// Calibre timestamps look like this: `2024-12-30 14:13:52.213388+00:00`.
+/// According to RFC 4287 §3.3 date and time must be separated by 'T'
+fn to_rfc3339(calibre: &str) -> String {
+    calibre.replacen(' ', "T", 1)
+}
+
+fn library_updated(db: &Connection) -> String {
+    let latest: Option<String> = db
+        .query_row("SELECT MAX(last_modified) FROM books;", params![], |row| {
+            row.get(0)
+        })
+        .unwrap_or(None);
+    // Calibre's own default for a book that has never been touched.
+    to_rfc3339(&latest.unwrap_or_else(|| "2000-01-01 00:00:00+00:00".to_string()))
+}
+
 fn feed_id(path: &str) -> String {
     match path.trim_matches('/') {
         "" => "urn:orca:root".to_string(),
@@ -109,7 +126,7 @@ fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>, what: &str) 
 }
 
 /// The columns every book feed needs
-const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, c.text AS synopsis,
+const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format) FROM data WHERE book = b.id) AS formats";
 
 /// Run one of the book queries and map its rows to `Book`s.
@@ -128,7 +145,8 @@ fn query_books(
             id: row.get("id")?,
             uuid: row.get("uuid").unwrap_or_default(),
             title: row.get("title")?,
-            pubdate: row.get("pubdate")?,
+            pubdate: to_rfc3339(&row.get::<_, String>("pubdate")?),
+            updated: to_rfc3339(&row.get::<_, String>("last_modified")?),
             synopsis,
             formats,
             authors: Vec::new(),
@@ -312,8 +330,16 @@ async fn index(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest) -
             .finish();
     }
 
+    let updated = data
+        .db
+        .values()
+        .map(|db| library_updated(&lock_db(db)))
+        .max()
+        .unwrap_or_else(|| "2000-01-01T00:00:00+00:00".to_string());
+
     let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("libraries", &libraries);
+    ctx.insert("updated", &updated);
     render_template(&data.templates, "index.xml.tera", ctx)
 }
 
@@ -325,12 +351,14 @@ async fn opds(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    if !data.db.contains_key(&lib) {
-        return HttpResponse::NotFound().body(format!("Database '{}' not found", lib));
-    }
+    let db = match data.db.get(&lib) {
+        Some(db) => lock_db(db),
+        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    };
 
     let mut ctx = feed_ctx(&req, data.config);
     ctx.insert("lib", &lib);
+    ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "opds.xml.tera", ctx)
 }
 
@@ -367,6 +395,7 @@ async fn tags(
 
     let tags: Vec<Tag> = collect_rows(tags_iter, "tag");
     ctx.insert("tags", &tags);
+    ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "tags.xml.tera", ctx)
 }
 
@@ -404,6 +433,7 @@ async fn books_by_tag(
     };
 
     ctx.insert("books", &books_by_tag);
+    ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "books.xml.tera", ctx)
 }
 
@@ -441,6 +471,7 @@ async fn authors(
 
     let authors: Vec<Author> = collect_rows(author_iter, "author");
     ctx.insert("authors", &authors);
+    ctx.insert("updated", &library_updated(&db));
 
     render_template(&data.templates, "authors.xml.tera", ctx)
 }
@@ -479,6 +510,7 @@ async fn books_by_author(
     };
 
     ctx.insert("books", &books_by_author);
+    ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "books.xml.tera", ctx)
 }
 
@@ -515,6 +547,7 @@ async fn getbooks(
     };
 
     ctx.insert("books", &books);
+    ctx.insert("updated", &library_updated(&db));
 
     render_template(&data.templates, "books.xml.tera", ctx)
 }

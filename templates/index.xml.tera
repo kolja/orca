@@ -8,6 +8,7 @@
   <title>{{ lib }}</title>
   <id>urn:orca:{{ lib }}</id>
   <link href="/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <updated>{{ updated }}</updated>
   <content type="text">{{ lib }}</content>
   </entry>
   {% endfor %}

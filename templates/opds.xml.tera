@@ -7,6 +7,7 @@
     <title>Authors</title>
     <id>urn:orca:{{ lib }}:authors</id>
     <link href="/{{ lib }}/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
     <content type="text">Authors</content>
   </entry>
 
@@ -14,6 +15,7 @@
     <title>Tags</title>
     <id>urn:orca:{{ lib }}:tags</id>
     <link href="/{{ lib }}/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
     <content type="text">Tags</content>
   </entry>
 
@@ -21,6 +23,7 @@
     <title>All Books</title>
     <id>urn:orca:{{ lib }}:books</id>
   <link href="/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
     <content type="text">All Books (Titles)</content>
   </entry>
 {% endblock content %}

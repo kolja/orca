@@ -5,21 +5,21 @@
 
   <entry>
     <title>Authors</title>
-    <id>ORCA:Menu:Authors</id>
+    <id>urn:orca:{{ lib }}:authors</id>
     <link href="/{{ lib }}/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Authors</content>
   </entry>
 
   <entry>
     <title>Tags</title>
-    <id>ORCA:Menu:Tags</id>
+    <id>urn:orca:{{ lib }}:tags</id>
     <link href="/{{ lib }}/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Tags</content>
   </entry>
 
   <entry>
     <title>All Books</title>
-    <id>ORCA:Menu:Books</id>
+    <id>urn:orca:{{ lib }}:books</id>
   <link href="/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">All Books (Titles)</content>
   </entry>

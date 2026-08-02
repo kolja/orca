@@ -85,6 +85,119 @@ async fn list_books() {
     assert_eq!(count_items(&content), 4);
 }
 
+// Atom requires <id> to be an IRI, so a bare Calibre row id won't cut it
+#[test]
+async fn book_ids_are_uuid_urns() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/books")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(content.contains("<id>urn:uuid:8b9f853c-7171-4f09-ba21-7304603a5128</id>"));
+    assert!(!content.contains("<id>4</id>"));
+}
+
+// Atom requires a feed id to be permanent, so it is derived from the request
+// path rather than the full URL
+#[test]
+async fn each_feed_carries_its_own_id() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for (path, expected) in [
+        ("/library", "<id>urn:orca:library</id>"),
+        ("/library/books", "<id>urn:orca:library:books</id>"),
+        ("/library/authors", "<id>urn:orca:library:authors</id>"),
+        ("/library/tags", "<id>urn:orca:library:tags</id>"),
+        ("/library/authors/5", "<id>urn:orca:library:authors:5</id>"),
+        ("/library/tags/5", "<id>urn:orca:library:tags:5</id>"),
+    ] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+        assert!(content.contains(expected), "{} should contain {}", path, expected);
+    }
+}
+
+#[test]
+async fn entries_are_identified_by_what_they_refer_to() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for (path, expected) in [
+        ("/library", "<id>urn:orca:library:authors</id>"),
+        ("/library", "<id>urn:orca:library:tags</id>"),
+        ("/library", "<id>urn:orca:library:books</id>"),
+        ("/library/authors", "<id>urn:orca:library:author:5</id>"),
+        ("/library/tags", "<id>urn:orca:library:tag:5</id>"),
+    ] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        let body = test::read_body(resp).await;
+        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+        assert!(content.contains(expected), "{} should contain {}", path, expected);
+    }
+}
+
+// The id must survive a move behind a reverse proxy or a switch to https.
+// The self link tracks the deployment; the id must not.
+#[test]
+async fn feed_ids_ignore_the_deployment() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let req = test::TestRequest::with_uri("/library/books")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .insert_header(("X-Forwarded-Proto", "https"))
+        .insert_header(("X-Forwarded-Host", "books.example.com"))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+
+    assert!(content.contains("https://books.example.com/library/books"));
+    assert!(content.contains("<id>urn:orca:library:books</id>"));
+}
+
+#[test]
+async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
+    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
+    let mut context = tera::Context::new();
+    context.insert("config", &state.config);
+    context.insert("lib", "library");
+    context.insert("base", "http://localhost:8888");
+    context.insert("self_url", "http://localhost:8888/library/books");
+    context.insert("feed_id", "urn:orca:library:books");
+    context.insert("books", &serde_json::json!([{
+        "id": 999,
+        "uuid": "",
+        "title": "A Book From The Before Times",
+        "pubdate": "2026-01-01T00:00:00+00:00",
+        "synopsis": "",
+        "authors": [],
+        "formats": ["epub"]
+    }]));
+
+    let content = state
+        .templates
+        .render("books.xml.tera", &context)
+        .expect("Failed to render books template");
+
+    assert!(content.contains("<id>urn:orca:library:book:999</id>"));
+}
+
 #[test]
 async fn book_metadata_is_xml_escaped() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
@@ -93,6 +206,7 @@ async fn book_metadata_is_xml_escaped() {
     context.insert("lib", "library");
     context.insert("base", "http://localhost:8888");
     context.insert("self_url", "http://localhost:8888/library/books");
+    context.insert("feed_id", "urn:orca:library:books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips <Special>",
@@ -122,6 +236,7 @@ async fn mime_types_are_not_escaped() {
     context.insert("lib", "library");
     context.insert("base", "http://localhost:8888");
     context.insert("self_url", "http://localhost:8888/library/books");
+    context.insert("feed_id", "urn:orca:library:books");
     context.insert("books", &serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips",

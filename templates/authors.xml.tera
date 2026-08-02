@@ -7,7 +7,7 @@
   {% for author in authors %}
   <entry>
     <title>{{ author.name }}</title>
-    <id>ORCA:Authors{{ author.id }}</id>
+    <id>urn:orca:{{ lib }}:author:{{ author.id }}</id>
   <link href="/{{ lib }}/authors/{{ author.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Books by {{ author.name }}</content>
   </entry>

@@ -7,7 +7,7 @@
   {% for tag in tags %}
   <entry>
     <title>{{ tag.name }}</title>
-    <id>ORCA:Tags{{ tag.id }}</id>
+    <id>urn:orca:{{ lib }}:tag:{{ tag.id }}</id>
   <link href="/{{ lib }}/tags/{{ tag.id }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
     <content type="text">Books tagged {{ tag.name }}</content>
   </entry>

@@ -7,7 +7,7 @@
   {% for book in books %}
   <entry>
     <title>{{ book.title }}</title>
-    <id>{{ book.id }}</id>
+    <id>{% if book.uuid %}urn:uuid:{{ book.uuid }}{% else %}urn:orca:{{ lib }}:book:{{ book.id }}{% endif %}</id>
   <link href="/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
   <link href="/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
     {% for format in book.formats %}

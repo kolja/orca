@@ -6,6 +6,7 @@
   {% for lib in libraries %}
   <entry>
   <title>{{ lib }}</title>
+  <id>urn:orca:{{ lib }}</id>
   <link href="/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
   <content type="text">{{ lib }}</content>
   </entry>

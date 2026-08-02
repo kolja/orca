@@ -15,6 +15,7 @@ use crate::config::Config;
 #[derive(Debug, Serialize)]
 struct Book {
     id: i32,
+    uuid: String,
     title: String,
     pubdate: String,
     synopsis: String,
@@ -66,20 +67,25 @@ fn origin(req: &HttpRequest, config: &Config) -> String {
     }
 }
 
-/// Context common to every feed: the config plus the absolute URL of this feed
-/// for `<link rel="self">`. Some clients resolve the relative
-/// hrefs of entries against the self link rather than against the URL they
-/// fetched, so the self link has to be both absolute and per-request.
+fn feed_id(path: &str) -> String {
+    match path.trim_matches('/') {
+        "" => "urn:orca:root".to_string(),
+        path => format!("urn:orca:{}", path.replace('/', ":")),
+    }
+}
+
+/// config plus the absolute URL of this feed for `<link rel="self">`.
+/// Some clients resolve the relative hrefs of entries against the self link
 fn feed_ctx(req: &HttpRequest, config: &Config) -> tera::Context {
     let mut ctx = tera::Context::new();
     let origin = origin(req, config);
     ctx.insert("self_url", &format!("{}{}", origin, req.path()));
     ctx.insert("base", &origin);
+    ctx.insert("feed_id", &feed_id(req.path()));
     ctx.insert("config", config);
     ctx
 }
 
-/// Take the connection lock, recovering from poisoning
 fn lock_db(db: &Mutex<Connection>) -> MutexGuard<'_, Connection> {
     db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -103,7 +109,7 @@ fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>, what: &str) 
 }
 
 /// The columns every book feed needs
-const BOOK_COLUMNS: &str = "b.id, b.title, b.pubdate, c.text AS synopsis,
+const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format) FROM data WHERE book = b.id) AS formats";
 
 /// Run one of the book queries and map its rows to `Book`s.
@@ -120,6 +126,7 @@ fn query_books(
         let formats = format_str.split(',').filter_map(Format::from_str).collect();
         Ok(Book {
             id: row.get("id")?,
+            uuid: row.get("uuid").unwrap_or_default(),
             title: row.get("title")?,
             pubdate: row.get("pubdate")?,
             synopsis,

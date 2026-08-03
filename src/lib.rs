@@ -2,6 +2,7 @@
 pub mod templates;
 pub mod appstate;
 pub mod authorized;
+pub mod calibre;
 pub mod config;
 pub mod tls;
 pub mod hash;
@@ -35,9 +36,7 @@ fn format_to_mime_filter(format: &str, _: Kwargs, _: &State) -> &'static str {
 fn open_library(library: &str, path: &str) -> Result<Connection> {
     let db_path = format!("{}/metadata.db", path);
 
-    // Checked before opening because `Connection::open` would otherwise *create*
-    // an empty database for a mistyped path, leaving a server that answers every
-    // request for this library with "no such table: books".
+    // Checked before opening. Otherwise `Connection::open` would *create* an empty database
     if !Path::new(&db_path).is_file() {
         return Err(anyhow!("library '{}': no Calibre database at '{}'", library, db_path));
     }
@@ -59,8 +58,7 @@ pub fn create_app(config: &'static Config) -> Result<AppState> {
         return Err(anyhow!("no libraries configured under [calibre.libraries]"));
     }
 
-    // Every configured library has to open: serving a partial catalog because of
-    // a typo looks like data loss to a client that synced the full one before.
+    // Every configured library has to open
     let mut db_map: HashMap<String, Arc<Mutex<Connection>>> = HashMap::new();
     for (library, settings) in &config.calibre.libraries {
         let db = open_library(library, &settings.path)?;
@@ -203,9 +201,8 @@ mod tests {
         assert!(err.contains("no Calibre database at 'tests/calibr/metadata.db'"), "{}", err);
     }
 
-    // The reason `open_library` checks before opening: SQLite would create the
-    // missing file, turning a config typo into a 500 on every request instead of
-    // an error at startup.
+    // The reason `open_library` checks before opening: SQLite would create the missing file, 
+    // turning a config typo into a 500 on every request instead of an error at startup.
     #[test]
     fn a_mistyped_path_does_not_create_a_database() {
         let dir = TempDir::new().unwrap();

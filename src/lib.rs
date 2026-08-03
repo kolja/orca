@@ -22,14 +22,10 @@ use templates::Template;
 use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, recently_added, tags};
 use appstate::AppState;
 
-// Tera filter to convert format to mime type
+// Tera filter to convert format to mime type. The table itself lives next to the
+// formats it names, so the OPDS 2.0 links can use it too.
 fn format_to_mime_filter(format: &str, _: Kwargs, _: &State) -> &'static str {
-    match format {
-        "epub" => "application/epub+zip",
-        "pdf" => "application/pdf",
-        "mobi" => "application/x-mobipocket-ebook",
-        _ => "application/octet-stream",
-    }
+    calibre::mime(format)
 }
 
 /// Open one Calibre library, or explain why it cannot be served.

@@ -445,7 +445,7 @@ async fn mime_types_are_not_escaped() {
         "updated": "2026-01-01T00:00:00+00:00",
         "synopsis": "Science fact & science fiction",
         "authors": [{"id": 1, "name": "O'Brien & Sons"}],
-        "formats": ["epub", "pdf", "mobi", "cbz"]
+        "formats": ["epub", "pdf", "mobi", "cbz", "lrf"]
     }]));
 
     let content = state
@@ -456,6 +456,7 @@ async fn mime_types_are_not_escaped() {
     assert!(content.contains(r#"type="application/epub+zip""#));
     assert!(content.contains(r#"type="application/pdf""#));
     assert!(content.contains(r#"type="application/x-mobipocket-ebook""#));
+    assert!(content.contains(r#"type="application/vnd.comicbook+zip""#));
     // Unrecognised formats fall back to a generic mime type.
     assert!(content.contains(r#"type="application/octet-stream""#));
 
@@ -637,6 +638,47 @@ async fn each_format_is_offered_exactly_once() {
     for uri in ["/library/books", "/library/authors/4", "/library/tags/5"] {
         let content = body_of(&app, uri, &credentials).await;
         assert_eq!(count_links(&content, "/library/file/4/epub"), 1, "{}", uri);
+    }
+}
+
+// Alice is stored as epub and azw3. A format Orca has no mime type of its own
+// for must still reach the client: dropping it can leave a book with nothing to
+// acquire at all.
+#[test]
+async fn formats_beyond_the_usual_three_are_offered_too() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/books", &credentials).await;
+    assert_eq!(count_links(&content, "/library/file/4/epub"), 1);
+    assert_eq!(count_links(&content, "/library/file/4/azw3"), 1);
+    assert!(content.contains(r#"type="application/vnd.amazon.mobi8-ebook""#));
+
+    let req = test::TestRequest::with_uri("/library/file/4/azw3")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success(), "the offered format must download");
+
+    // AZW3 is Amazon's KF8, which still carries a PalmDB header.
+    let body = test::read_body(resp).await;
+    assert_eq!(&body[60..68], b"BOOKMOBI");
+}
+
+// Book 5 is an epub and nothing else, book 4 has no mobi. Asking for a format
+// the library does not hold is a 404 -- it used to be a 500, because the path
+// was built before anyone checked whether that file existed.
+#[test]
+async fn a_format_the_library_does_not_hold_is_404() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for uri in ["/library/file/5/pdf", "/library/file/4/mobi"] {
+        let req = test::TestRequest::with_uri(uri)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{} should be 404", uri);
     }
 }
 

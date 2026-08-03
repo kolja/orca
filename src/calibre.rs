@@ -25,7 +25,8 @@ pub struct Book {
     pub pubdate: String,
     pub updated: String,
     pub synopsis: String,
-    pub formats: Vec<Format>,
+    /// Lowercased Calibre format names: `epub`, `azw3`, `cbz` ...
+    pub formats: Vec<String>,
     pub authors: Vec<Author>,
     /// BCP 47 tags, see `bcp47`.
     pub languages: Vec<String>,
@@ -43,22 +44,33 @@ pub struct Tag {
     pub name: String,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Format {
-    EPUB,
-    PDF,
-    MOBI,
+/// Calibre keeps the formats of a book as a comma separated list of uppercase
+/// names. Every one of them is offered for download, whether or not Orca knows
+/// its mime type: a book Orca drops the only format of has nothing to acquire.
+fn parse_formats(concatenated: &str) -> Vec<String> {
+    concatenated
+        .split(',')
+        .filter(|format| !format.is_empty())
+        .map(str::to_lowercase)
+        .collect()
 }
 
-impl Format {
-    fn from_str(s: &str) -> Option<Format> {
-        match s.to_lowercase().as_str() {
-            "epub" => Some(Format::EPUB),
-            "pdf" => Some(Format::PDF),
-            "mobi" => Some(Format::MOBI),
-            _ => None,
-        }
+/// The mime type of a Calibre format, as `parse_formats` spells it.
+/// Anything unknown is left to the client to sniff.
+pub fn mime(format: &str) -> &'static str {
+    match format {
+        "epub" => "application/epub+zip",
+        "pdf" => "application/pdf",
+        "mobi" | "prc" => "application/x-mobipocket-ebook",
+        "azw" => "application/vnd.amazon.ebook",
+        "azw3" => "application/vnd.amazon.mobi8-ebook",
+        "cbz" => "application/vnd.comicbook+zip",
+        "cbr" => "application/vnd.comicbook-rar",
+        "fb2" => "application/x-fictionbook+xml",
+        "djvu" => "image/vnd.djvu",
+        "rtf" => "application/rtf",
+        "txt" => "text/plain",
+        _ => "application/octet-stream",
     }
 }
 
@@ -198,21 +210,30 @@ pub fn cover_path(db: &Connection, book: i32) -> rusqlite::Result<String> {
 /// Where one format of a book lives, relative to the library directory.
 /// Calibre files every format of a book under the same stem, so the format only
 /// decides the extension.
+///
+/// Joining `data` rather than reading `books` alone is what makes a format the
+/// library does not hold -- or a book with no files at all -- `QueryReturnedNoRows`
+/// and so a 404, instead of a path that only fails once we try to open it.
 pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<String> {
     let mut stmt = db.prepare(
         "SELECT b.path, d.name AS file
             FROM books b
-            LEFT JOIN data d ON b.id = d.book
-            WHERE b.id = ?1 GROUP BY b.id;",
+            JOIN data d ON b.id = d.book
+            WHERE b.id = ?1 AND d.format = ?2 COLLATE NOCASE;",
     )?;
     let (path, file): (String, String) =
-        stmt.query_row(params![book], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        stmt.query_row(params![book, format], |row| Ok((row.get(0)?, row.get(1)?)))?;
     Ok(format!("{}/{}.{}", path, file, format))
 }
 
 /// The columns every book feed needs.
+///
+/// `GROUP_CONCAT` leaves the order of its input open, so the formats are sorted
+/// first: a client should not see the download links of a book shuffle between
+/// two requests that changed nothing.
 const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, c.text AS synopsis,
-    (SELECT GROUP_CONCAT(format) FROM data WHERE book = b.id) AS formats";
+    (SELECT GROUP_CONCAT(format)
+        FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats";
 
 /// Run one of the book queries and map its rows to `Book`s.
 fn query_books(
@@ -224,8 +245,7 @@ fn query_books(
     let rows = stmt.query_map(params, |row| {
         let synopsis: String = row.get("synopsis").unwrap_or_default();
         let synopsis = from_read(synopsis.as_bytes(), SYNOPSIS_WIDTH).unwrap_or_default();
-        let format_str: String = row.get("formats").unwrap_or_default();
-        let formats = format_str.split(',').filter_map(Format::from_str).collect();
+        let formats = parse_formats(&row.get::<_, String>("formats").unwrap_or_default());
         Ok(Book {
             id: row.get("id")?,
             uuid: row.get("uuid").unwrap_or_default(),
@@ -360,6 +380,32 @@ mod tests {
         assert_eq!(tolstoy.languages, ["ru"]);
     }
 
+    // Dropping a format Orca has no mime type for would leave a book that is
+    // only stored as azw3 with nothing to download at all.
+    #[test]
+    fn every_format_is_offered_however_exotic() {
+        assert_eq!(parse_formats("EPUB,AZW3,CBZ"), ["epub", "azw3", "cbz"]);
+        assert_eq!(mime("azw3"), "application/vnd.amazon.mobi8-ebook");
+        assert_eq!(mime("epub"), "application/epub+zip");
+        // What Orca cannot name, the client may still know what to do with.
+        assert_eq!(mime("lrf"), "application/octet-stream");
+    }
+
+    // GROUP_CONCAT over no rows is NULL, which reads back as "".
+    #[test]
+    fn a_book_with_no_files_has_no_formats() {
+        assert!(parse_formats("").is_empty());
+    }
+
+    #[test]
+    fn books_carry_every_format_the_library_holds() {
+        let db = library();
+        let books = books(&db).expect("books");
+
+        let alice = books.iter().find(|book| book.id == 4).expect("Alice");
+        assert_eq!(alice.formats, ["azw3", "epub"]);
+    }
+
     #[test]
     fn a_missing_cover_is_no_rows_rather_than_an_error() {
         let db = library();
@@ -374,6 +420,19 @@ mod tests {
         let db = library();
         assert!(cover_path(&db, 5).expect("cover").ends_with("/cover.jpg"));
         assert!(file_path(&db, 5, "epub").expect("file").ends_with(".epub"));
+        // Calibre spells its formats in upper case, the routes in lower.
+        assert!(file_path(&db, 4, "azw3").expect("file").ends_with(".azw3"));
+    }
+
+    // Kant is an epub and nothing else. Asking for a pdf of him is a 404, not a
+    // path that only turns out to be wrong once the file is opened.
+    #[test]
+    fn a_format_the_library_does_not_hold_is_no_rows() {
+        let db = library();
+        assert!(matches!(
+            file_path(&db, 5, "pdf"),
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        ));
     }
 
     // An empty library must not produce `... IN ()`.

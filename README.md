@@ -50,9 +50,15 @@ bob = "$argon2id$v=19$m=19456,t=2,p=1$FMnONzRzIAkaIuy3c+A9cg$DE3+UC62d/f+L0jqEWg
 [authentication]
 public = ["/", "/library/**"] # the root endpoint is publicly accessible, so is everything under /library
 
-[calibre.libraries]
-library = "/Volumes/library"
-nonfiction = "/Volumes/nonfiction"
+[catalog]
+author = "Jorge Luis Borges" # optional (default: "orca")
+
+[calibre.libraries.library]
+path = "/Volumes/library"
+
+[calibre.libraries.nonfiction]
+path = "/Volumes/nonfiction"
+author = "Isaac Newton" # optional (overrides catalog.author)
 ```
 ## Authentication
 
@@ -63,6 +69,10 @@ orca --hash <login>:<password> # e.g. orca --hash alice:secretpassword
 The server will print the hash which you have to copy to the `[authentication.login]` section of your config file.
 
 Under the `public` array in the `[authentication]` section you can specify which paths should be accessible without authentication. You can use wildcards like `*` and `**` to match multiple paths.
+
+## Who publishes the catalog
+
+According to RFC 4287 every catalog needs an Author. The field is set to "orca" by default, but you can override it for the entire catalog or set it individually per library.
 
 ## Running behind a reverse proxy
 

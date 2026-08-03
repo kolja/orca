@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
-  <author> <name>Kolja</name> </author>
+  <author><name>{{ author }}</name></author>
+  <generator uri="{{ repository }}" version="{{ version }}">orca</generator>
   <id>{{ feed_id }}</id>
   <updated>{{ updated }}</updated>
   <link rel="self" href="{{ self_url }}" type="application/atom+xml;profile=opds-catalog" />

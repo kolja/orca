@@ -62,8 +62,8 @@ pub fn create_app(config: &'static Config) -> Result<AppState> {
     // Every configured library has to open: serving a partial catalog because of
     // a typo looks like data loss to a client that synced the full one before.
     let mut db_map: HashMap<String, Arc<Mutex<Connection>>> = HashMap::new();
-    for (library, path) in &config.calibre.libraries {
-        let db = open_library(library, path)?;
+    for (library, settings) in &config.calibre.libraries {
+        let db = open_library(library, &settings.path)?;
         println!("Connected to {}", library);
         db_map.insert(library.clone(), Arc::new(Mutex::new(db)));
     }
@@ -150,7 +150,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use config::{Authentication, Calibre, Protocol, Server};
+    use config::{Authentication, Calibre, Catalog, Library, Protocol, Server};
     use std::fs;
     use tempfile::TempDir;
 
@@ -168,9 +168,15 @@ mod tests {
             calibre: Calibre {
                 libraries: libraries
                     .iter()
-                    .map(|(name, path)| (name.to_string(), path.to_string()))
+                    .map(|(name, path)| {
+                        (
+                            name.to_string(),
+                            Library { path: path.to_string(), author: None },
+                        )
+                    })
                     .collect(),
             },
+            catalog: Catalog::default(),
         }))
     }
 

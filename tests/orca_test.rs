@@ -236,6 +236,69 @@ async fn feeds_of_books_are_advertised_as_acquisition_feeds() {
     }
 }
 
+// The http config has no [catalog] section at all.
+#[test]
+async fn an_unsigned_catalog_names_no_one() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
+        let content = body_of(&app, path, &credentials).await;
+        assert!(
+            content.contains("<author><name>orca</name></author>"),
+            "{} should fall back to the default author",
+            path
+        );
+    }
+}
+
+// The https config sets `catalog.author`, and library2 overrides it.
+#[test]
+async fn a_library_may_name_its_own_author() {
+    let app = setup(Https).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for (path, expected) in [
+        ("/library", "Jorge Luis Borges"),
+        ("/library/books", "Jorge Luis Borges"),
+        ("/library2", "Isaac Newton"),
+        ("/library2/books", "Isaac Newton"),
+        // The index spans libraries, so it can only use the catalog default.
+        ("/", "Jorge Luis Borges"),
+    ] {
+        let content = body_of(&app, path, &credentials).await;
+        assert!(
+            content.contains(&format!("<author><name>{}</name></author>", expected)),
+            "{} should be signed by {}",
+            path,
+            expected
+        );
+    }
+}
+
+// <author> is whoever publishes the catalog; the software belongs in <generator>.
+#[test]
+async fn feeds_name_the_software_that_built_them() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library", &credentials).await;
+
+    let generator = content
+        .split("<generator")
+        .nth(1)
+        .expect("the feed should carry a <generator>")
+        .split("</generator>")
+        .next()
+        .unwrap_or_default();
+
+    assert!(generator.ends_with(">orca"), "got:{}", generator);
+    assert!(
+        generator.contains(&format!(r#"version="{}""#, env!("CARGO_PKG_VERSION"))),
+        "the generator should carry the running version, got:{}",
+        generator
+    );
+}
+
 // RFC 4287 §3.3: 'T' must separate date and time
 #[test]
 async fn dates_are_rfc3339() {
@@ -307,18 +370,28 @@ async fn every_entry_carries_an_updated() {
     }
 }
 
-#[test]
-async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
-    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
+/// What a handler hands `books.xml.tera`, for the tests below that render the
+/// template directly rather than through the server.
+fn book_feed_context(config: &Config, books: serde_json::Value) -> tera::Context {
     let mut context = tera::Context::new();
-    context.insert("config", &state.config);
+    context.insert("config", config);
     context.insert("lib", "library");
     context.insert("base", "http://localhost:8888");
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
     context.insert("updated", "2026-01-01T00:00:00+00:00");
     context.insert("feed_title", "library | 1 books");
-    context.insert("books", &serde_json::json!([{
+    context.insert("author", "orca");
+    context.insert("version", "0.0.0");
+    context.insert("repository", "https://example.invalid/orca");
+    context.insert("books", &books);
+    context
+}
+
+#[test]
+async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
+    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
+    let context = book_feed_context(state.config, serde_json::json!([{
         "id": 999,
         "uuid": "",
         "title": "A Book From The Before Times",
@@ -340,15 +413,7 @@ async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
 #[test]
 async fn book_metadata_is_xml_escaped() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
-    let mut context = tera::Context::new();
-    context.insert("config", &state.config);
-    context.insert("lib", "library");
-    context.insert("base", "http://localhost:8888");
-    context.insert("self_url", "http://localhost:8888/library/books");
-    context.insert("feed_id", "urn:orca:library:books");
-    context.insert("updated", "2026-01-01T00:00:00+00:00");
-    context.insert("feed_title", "library | 1 books");
-    context.insert("books", &serde_json::json!([{
+    let context = book_feed_context(state.config, serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips <Special>",
         "pubdate": "2026-01-01T00:00:00+00:00",
@@ -373,15 +438,7 @@ async fn book_metadata_is_xml_escaped() {
 #[test]
 async fn mime_types_are_not_escaped() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
-    let mut context = tera::Context::new();
-    context.insert("config", &state.config);
-    context.insert("lib", "library");
-    context.insert("base", "http://localhost:8888");
-    context.insert("self_url", "http://localhost:8888/library/books");
-    context.insert("feed_id", "urn:orca:library:books");
-    context.insert("updated", "2026-01-01T00:00:00+00:00");
-    context.insert("feed_title", "library | 1 books");
-    context.insert("books", &serde_json::json!([{
+    let context = book_feed_context(state.config, serde_json::json!([{
         "id": 999,
         "title": "Fish & Chips",
         "pubdate": "2026-01-01T00:00:00+00:00",

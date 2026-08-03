@@ -13,6 +13,16 @@ pub struct Config {
     pub server: Server,
     pub authentication: Authentication,
     pub calibre: Calibre,
+    #[serde(default)]
+    pub catalog: Catalog,
+}
+
+impl Config {
+    pub fn author(&self, lib: Option<&str>) -> &str {
+        lib.and_then(|lib| self.calibre.libraries.get(lib))
+            .and_then(|lib| lib.author.as_deref())
+            .unwrap_or(&self.catalog.author)
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -47,7 +57,31 @@ pub struct Authentication {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Calibre {
-    pub libraries: HashMap<String, String>,
+    pub libraries: HashMap<String, Library>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Library {
+    pub path: String,
+    #[serde(default)]
+    pub author: Option<String>,
+}
+
+/// How the catalog presents itself, as opposed to where its books live.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Catalog {
+    #[serde(default = "orca")]
+    pub author: String,
+}
+
+fn orca() -> String {
+    "orca".to_string()
+}
+
+impl Default for Catalog {
+    fn default() -> Self {
+        Catalog { author: orca() }
+    }
 }
 
 #[derive(Debug)]

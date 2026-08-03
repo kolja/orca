@@ -92,14 +92,20 @@ fn feed_id(path: &str) -> String {
 }
 
 /// config plus the absolute URL of this feed for `<link rel="self">`.
-/// Some clients resolve the relative hrefs of entries against the self link
-fn feed_ctx(req: &HttpRequest, config: &Config) -> tera::Context {
+/// Some clients resolve the relative hrefs of entries against the self link.
+fn feed_ctx(req: &HttpRequest, config: &Config, lib: Option<&str>) -> tera::Context {
     let mut ctx = tera::Context::new();
     let origin = origin(req, config);
     ctx.insert("self_url", &format!("{}{}", origin, req.path()));
     ctx.insert("base", &origin);
     ctx.insert("feed_id", &feed_id(req.path()));
+    ctx.insert("author", config.author(lib));
+    ctx.insert("version", env!("CARGO_PKG_VERSION"));
+    ctx.insert("repository", env!("CARGO_PKG_REPOSITORY"));
     ctx.insert("config", config);
+    if let Some(lib) = lib {
+        ctx.insert("lib", lib);
+    }
     ctx
 }
 
@@ -165,7 +171,7 @@ fn query_books(
     Ok(books)
 }
 
-/// The authors of each of the given books, by book id. 
+/// The authors of each of the given books, by book id.
 /// Books are joined to their authors in a separate query
 fn authors_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMap<i32, Vec<Author>>> {
     if book_ids.is_empty() {
@@ -235,6 +241,7 @@ async fn cover(
         .calibre
         .libraries
         .get(&lib)
+        .map(|library| &library.path)
         .ok_or_else(|| actix_web::error::ErrorNotFound("Library not found"))?;
 
     let mut stmt = db_lock
@@ -282,6 +289,7 @@ async fn book_file(
         .calibre
         .libraries
         .get(&db)
+        .map(|library| &library.path)
         .ok_or_else(|| actix_web::error::ErrorNotFound("Library not found"))?;
 
     let mut stmt = db_lock
@@ -340,7 +348,7 @@ async fn index(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest) -
         .max()
         .unwrap_or_else(|| "2000-01-01T00:00:00+00:00".to_string());
 
-    let mut ctx = feed_ctx(&req, data.config);
+    let mut ctx = feed_ctx(&req, data.config, None);
     ctx.insert("libraries", &libraries);
     ctx.insert("updated", &updated);
     render_template(&data.templates, "index.xml.tera", ctx)
@@ -359,8 +367,7 @@ async fn opds(
         None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
     };
 
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
     ctx.insert("updated", &library_updated(&db));
     render_template(&data.templates, "opds.xml.tera", ctx)
 }
@@ -378,8 +385,7 @@ async fn tags(
         None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
     };
 
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
 
     let mut stmt = match db.prepare("SELECT id, name FROM tags;") {
         Ok(stmt) => stmt,
@@ -410,8 +416,7 @@ async fn books_by_tag(
     req: HttpRequest,
 ) -> impl Responder {
     let (lib, tag_id) = path.into_inner();
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
 
     let db = match data.db.get(&lib) {
         Some(db) => lock_db(db),
@@ -450,8 +455,7 @@ async fn authors(
 ) -> impl Responder {
     let lib = path.into_inner();
 
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
 
     let db = match data.db.get(&lib) {
         Some(db) => lock_db(db),
@@ -488,8 +492,7 @@ async fn books_by_author(
     req: HttpRequest,
 ) -> impl Responder {
     let (lib, author_id) = author_id.into_inner();
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
 
     let db = match data.db.get(&lib) {
         Some(db) => lock_db(db),
@@ -528,8 +531,7 @@ async fn getbooks(
 ) -> impl Responder {
     let lib = path.into_inner();
 
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
 
     let db = match data.db.get(&lib) {
         Some(db) => lock_db(db),
@@ -568,8 +570,7 @@ async fn recently_added(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    let mut ctx = feed_ctx(&req, data.config);
-    ctx.insert("lib", &lib);
+    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
 
     let db = match data.db.get(&lib) {
         Some(db) => lock_db(db),

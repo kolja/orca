@@ -257,10 +257,6 @@ pub fn cover_path(db: &Connection, book: i32) -> rusqlite::Result<String> {
 /// Where one format of a book lives, relative to the library directory.
 /// Calibre files every format of a book under the same stem, so the format only
 /// decides the extension.
-///
-/// Joining `data` rather than reading `books` alone is what makes a format the
-/// library does not hold -- or a book with no files at all -- `QueryReturnedNoRows`
-/// and so a 404, instead of a path that only fails once we try to open it.
 pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<String> {
     let mut stmt = db.prepare(
         "SELECT b.path, d.name AS file
@@ -274,10 +270,7 @@ pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<S
 }
 
 /// The columns every book feed needs.
-///
-/// `GROUP_CONCAT` leaves the order of its input open, so the formats are sorted
-/// first: a client should not see the download links of a book shuffle between
-/// two requests that changed nothing.
+/// `GROUP_CONCAT` : a client should not see the download links shuffle between requests
 const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format)
         FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats";
@@ -461,11 +454,14 @@ mod tests {
         let db = library();
         let ids = |books: Vec<Book>| books.iter().map(|book| book.id).collect::<Vec<_>>();
 
-        assert_eq!(count_books(&db).expect("count"), 4);
-        assert_eq!(ids(books_page(&db, 2, 0).expect("first page")), [4, 5]);
-        assert_eq!(ids(books_page(&db, 2, 2).expect("second page")), [6, 2]);
-        // Kant sorts under K, but the Galileo under "sidereal messenger, The".
-        assert!(books_page(&db, 10, 4).expect("past the end").is_empty());
+        assert_eq!(count_books(&db).expect("count"), 7);
+        assert_eq!(ids(books_page(&db, 2, 0).expect("first page")), [4, 8]);
+        assert_eq!(ids(books_page(&db, 2, 2).expect("second page")), [9, 5]);
+        // Kant sorts under K, but Galileo under "sidereal messenger, The".
+        assert_eq!(ids(books_page(&db, 2, 4).expect("third page")), [6, 7]);
+        // Seven books, pages of two: the last one holds the remainder.
+        assert_eq!(ids(books_page(&db, 2, 6).expect("last page")), [2]);
+        assert!(books_page(&db, 10, 7).expect("past the end").is_empty());
     }
 
     #[test]
@@ -506,8 +502,7 @@ mod tests {
         assert!(file_path(&db, 4, "azw3").expect("file").ends_with(".azw3"));
     }
 
-    // Kant is an epub and nothing else. Asking for a pdf of him is a 404, not a
-    // path that only turns out to be wrong once the file is opened.
+    // Kant has an epub only. Asking for a pdf -> 404
     #[test]
     fn a_format_the_library_does_not_hold_is_no_rows() {
         let db = library();

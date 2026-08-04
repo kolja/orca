@@ -56,7 +56,7 @@ async fn a_library_offers_its_books() {
     validates(&library, FEED);
     assert_eq!(library["metadata"]["title"], "library");
     assert_eq!(titles(&library["navigation"]), ["All Books", "Recently Added"]);
-    assert_eq!(library["navigation"][0]["properties"]["numberOfItems"], 4);
+    assert_eq!(library["navigation"][0]["properties"]["numberOfItems"], 7);
 }
 
 #[test]
@@ -66,7 +66,7 @@ async fn every_book_feed_is_a_valid_feed() {
     for path in ["/v2/library/books", "/v2/library/new"] {
         let books = feed(&app, path).await;
         validates(&books, FEED);
-        assert_eq!(books["publications"].as_array().unwrap().len(), 4);
+        assert_eq!(books["publications"].as_array().unwrap().len(), 7);
     }
 }
 
@@ -172,7 +172,7 @@ async fn a_library_that_fits_on_one_page_links_to_no_other() {
     let app = setup(&TEST_HTTP_CONFIG).await;
     let books = feed(&app, "/v2/library/books").await;
 
-    assert_eq!(books["metadata"]["numberOfItems"], 4);
+    assert_eq!(books["metadata"]["numberOfItems"], 7);
     assert_eq!(books["metadata"]["itemsPerPage"], 50);
     assert_eq!(books["metadata"]["currentPage"], 1);
     assert_eq!(rels(&books["links"]), ["self", "start"]);
@@ -186,7 +186,7 @@ async fn a_page_past_the_end_still_holds_books() {
 
     validates(&books, FEED);
     assert_eq!(books["metadata"]["currentPage"], 1);
-    assert_eq!(books["publications"].as_array().unwrap().len(), 4);
+    assert_eq!(books["publications"].as_array().unwrap().len(), 7);
     // The feed says where it really is, not where it was asked to be.
     assert_eq!(books["links"][0]["href"], "http://localhost:8080/v2/library/books");
 }

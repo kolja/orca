@@ -1,0 +1,25 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">8</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">b6124e47-a636-4ade-8e5c-f903f9655735</dc:identifier>
+        <dc:identifier opf:scheme="URI">https://www.gutenberg.org/ebooks/70652</dc:identifier>
+        <dc:title>At the Mountains of Madness</dc:title>
+        <dc:creator opf:file-as="Lovecraft, H. P." opf:role="aut">H. P. Lovecraft</dc:creator>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">calibre (7.22.0) [https://calibre-ebook.com]</dc:contributor>
+        <dc:date>1936-02-01T00:00:00+00:00</dc:date>
+        <dc:description>&lt;div&gt;
+&lt;p&gt;An expedition from Miskatonic University digs up what lay under the Antarctic ice, and the geologist who comes back writes it all down to keep the next expedition away. Serialised in &lt;em&gt;Astounding Stories&lt;/em&gt; over February, March and April 1936.&lt;/p&gt;&lt;/div&gt;</dc:description>
+        <dc:publisher>Street &amp; Smith</dc:publisher>
+        <dc:language>eng</dc:language>
+        <dc:subject>horror</dc:subject>
+        <dc:subject>science fiction</dc:subject>
+        <meta name="calibre:series" content="Astounding Stories"/>
+        <meta name="calibre:series_index" content="2"/>
+        <meta name="calibre:timestamp" content="2026-08-02T09:31:07+00:00"/>
+        <meta name="calibre:title_sort" content="At the Mountains of Madness"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>

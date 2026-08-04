@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='utf-8'?>
+<package xmlns="http://www.idpf.org/2007/opf" unique-identifier="uuid_id" version="2.0">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+        <dc:identifier opf:scheme="calibre" id="calibre_id">7</dc:identifier>
+        <dc:identifier opf:scheme="uuid" id="uuid_id">5b6f75b3-f39b-49a6-b6dd-66a402cb3f1f</dc:identifier>
+        <dc:identifier opf:scheme="URI">https://www.gutenberg.org/ebooks/29353</dc:identifier>
+        <dc:title>Vampires of Space</dc:title>
+        <dc:creator opf:file-as="Wright, Sewell Peaslee" opf:role="aut">Sewell Peaslee Wright</dc:creator>
+        <dc:contributor opf:file-as="calibre" opf:role="bkp">calibre (7.22.0) [https://calibre-ebook.com]</dc:contributor>
+        <dc:date>1932-03-01T00:00:00+00:00</dc:date>
+        <dc:description>&lt;div&gt;
+&lt;p&gt;One of Sewell Peaslee Wright's tales of the Special Patrol Service, told in retirement by Commander John Hanson of the &lt;em&gt;Ertak&lt;/em&gt;. First printed in &lt;em&gt;Astounding Stories&lt;/em&gt;, March 1932.&lt;/p&gt;&lt;/div&gt;</dc:description>
+        <dc:publisher>Street &amp; Smith</dc:publisher>
+        <dc:language>eng</dc:language>
+        <dc:subject>science fiction</dc:subject>
+        <meta name="calibre:series" content="Astounding Stories"/>
+        <meta name="calibre:series_index" content="1"/>
+        <meta name="calibre:timestamp" content="2026-08-01T18:12:44+00:00"/>
+        <meta name="calibre:title_sort" content="Vampires of Space"/>
+    </metadata>
+    <guide>
+        <reference type="cover" title="Cover" href="cover.jpg"/>
+    </guide>
+</package>

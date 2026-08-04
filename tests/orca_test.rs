@@ -82,7 +82,7 @@ async fn list_books() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert_eq!(count_items(&content), 4);
+    assert_eq!(count_items(&content), 7);
 }
 
 // Atom requires <id> to be an IRI, so a bare Calibre row id won't cut it
@@ -186,10 +186,11 @@ async fn recently_added_lists_the_newest_arrivals_first() {
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
     assert!(content.contains("<title>library | Recently Added</title>"));
-    assert_eq!(count_items(&content), 4);
+    assert_eq!(count_items(&content), 7);
 
-    // Galileo was added 2026-07-28, Carroll's timestamp is back in 1865.
-    let order: Vec<usize> = ["Galilei", "Kant", "Толстой", "Carroll"]
+    // The three Astounding Stories arrived in August 2026, Galileo in July;
+    // Carroll's timestamp is back in 1865.
+    let order: Vec<usize> = ["Smith", "Lovecraft", "Wright", "Galilei", "Kant", "Толстой", "Carroll"]
         .iter()
         .map(|name| content.find(name).unwrap_or_else(|| panic!("{} missing", name)))
         .collect();
@@ -330,7 +331,7 @@ async fn feeds_report_the_latest_change_in_the_library() {
     let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    // Galileo, id 6, is the most recently modified book: 2026-07-28.
+    // Galactic Patrol, id 9, is the most recently modified book: 2026-08-03.
     for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -340,7 +341,7 @@ async fn feeds_report_the_latest_change_in_the_library() {
         let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
         assert!(
-            content.contains("<updated>2026-07-28T19:57:00.000000+00:00</updated>"),
+            content.contains("<updated>2026-08-03T20:04:55.000000+00:00</updated>"),
             "{} should report the library's latest change",
             path
         );
@@ -478,7 +479,7 @@ async fn list_authors() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert_eq!(count_items(&content), 5);
+    assert_eq!(count_items(&content), 8);
 }
 
 #[test]
@@ -510,7 +511,7 @@ async fn list_tags() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert_eq!(count_items(&content), 5);
+    assert_eq!(count_items(&content), 7);
 }
 
 #[test]
@@ -700,7 +701,7 @@ async fn co_authored_books_list_every_author() {
     let credentials = BASE64.encode("alice:secretpassword");
 
     let content = body_of(&app, "/library/books", &credentials).await;
-    assert_eq!(count_items(&content), 4, "the co-authored book must not be duplicated");
+    assert_eq!(count_items(&content), 7, "the co-authored book must not be duplicated");
     assert!(content.contains("<name>Galileo Galilei</name>"));
     assert!(content.contains("<name>Johannes Kepler</name>"));
     // Author links must point at a route that exists.

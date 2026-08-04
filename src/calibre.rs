@@ -25,10 +25,11 @@ pub struct Book {
     pub pubdate: String,
     pub updated: String,
     pub synopsis: String,
-    /// Lowercased Calibre format names: `epub`, `azw3`, `cbz` ...
+    pub has_cover: bool,
+    /// epub, azw3, cbz ...
     pub formats: Vec<String>,
     pub authors: Vec<Author>,
-    /// BCP 47 tags, see `bcp47`.
+    /// BCP47 tags
     pub languages: Vec<String>,
 }
 
@@ -152,6 +153,52 @@ pub fn books(db: &Connection) -> rusqlite::Result<Vec<Book>> {
     )
 }
 
+/// One page of the library, ordered by the sort title Calibre keeps for exactly
+/// this purpose.
+///
+/// `books` leaves the order to SQLite, which costs nothing as long as the whole
+/// library is one feed. A page only means anything if the order is the same on
+/// the next request, or a client paging through the catalog sees some books
+/// twice and others never.
+pub fn books_page(db: &Connection, limit: usize, offset: usize) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book
+                ORDER BY b.sort LIMIT ?1 OFFSET ?2;",
+            BOOK_COLUMNS
+        ),
+        params![limit as i64, offset as i64],
+    )
+}
+
+/// How many books the library holds, for the `numberOfItems` of a feed.
+pub fn count_books(db: &Connection) -> rusqlite::Result<usize> {
+    let total: i64 = db.query_row("SELECT COUNT(*) FROM books;", params![], |row| row.get(0))?;
+    Ok(total as usize)
+}
+
+/// A single book, or `QueryReturnedNoRows` for one this library does not hold.
+pub fn book(db: &Connection, id: i32) -> rusqlite::Result<Book> {
+    let books = query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE b.id = ?1;",
+            BOOK_COLUMNS
+        ),
+        params![id],
+    )?;
+    books
+        .into_iter()
+        .next()
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
 /// `timestamp`: when a book entered the library. Sorting by `last_modified`
 /// would instead show all the books that were just retagged.
 pub fn recently_added(db: &Connection) -> rusqlite::Result<Vec<Book>> {
@@ -231,7 +278,7 @@ pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<S
 /// `GROUP_CONCAT` leaves the order of its input open, so the formats are sorted
 /// first: a client should not see the download links of a book shuffle between
 /// two requests that changed nothing.
-const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, c.text AS synopsis,
+const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format)
         FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats";
 
@@ -253,6 +300,7 @@ fn query_books(
             pubdate: to_rfc3339(&row.get::<_, String>("pubdate")?),
             updated: to_rfc3339(&row.get::<_, String>("last_modified")?),
             synopsis,
+            has_cover: row.get("has_cover").unwrap_or(false),
             formats,
             authors: Vec::new(),
             languages: Vec::new(),
@@ -404,6 +452,40 @@ mod tests {
 
         let alice = books.iter().find(|book| book.id == 4).expect("Alice");
         assert_eq!(alice.formats, ["azw3", "epub"]);
+    }
+
+    // Every page has to be a window on the same order, so that paging through
+    // the catalog shows every book exactly once.
+    #[test]
+    fn pages_follow_calibres_sort_title() {
+        let db = library();
+        let ids = |books: Vec<Book>| books.iter().map(|book| book.id).collect::<Vec<_>>();
+
+        assert_eq!(count_books(&db).expect("count"), 4);
+        assert_eq!(ids(books_page(&db, 2, 0).expect("first page")), [4, 5]);
+        assert_eq!(ids(books_page(&db, 2, 2).expect("second page")), [6, 2]);
+        // Kant sorts under K, but the Galileo under "sidereal messenger, The".
+        assert!(books_page(&db, 10, 4).expect("past the end").is_empty());
+    }
+
+    #[test]
+    fn a_single_book_reads_like_one_out_of_a_feed() {
+        let db = library();
+        let alice = book(&db, 4).expect("Alice");
+
+        assert_eq!(alice.title, "Alice's Adventures in Wonderland");
+        assert_eq!(alice.formats, ["azw3", "epub"]);
+        assert_eq!(alice.authors[0].name, "Lewis Carroll");
+        assert!(alice.has_cover);
+    }
+
+    #[test]
+    fn a_book_the_library_does_not_hold_is_no_rows() {
+        let db = library();
+        assert!(matches!(
+            book(&db, 99999),
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        ));
     }
 
     #[test]

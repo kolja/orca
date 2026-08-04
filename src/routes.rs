@@ -12,7 +12,7 @@ use crate::config::Config;
 /// trailing slash. `connection_info` honours X-Forwarded-Proto / X-Forwarded-Host,
 /// so this stays correct behind a reverse proxy -- could otherwise be resolved to something like
 /// 0.0.0.0
-fn origin(req: &HttpRequest, config: &Config) -> String {
+pub(crate) fn origin(req: &HttpRequest, config: &Config) -> String {
     match &config.server.public_url {
         Some(url) => url.trim_end_matches('/').to_string(),
         None => {
@@ -48,7 +48,7 @@ fn feed_ctx(req: &HttpRequest, config: &Config, lib: Option<&str>) -> tera::Cont
 }
 
 /// Log a failure and turn it into a 500
-fn server_error(what: &str, e: impl std::fmt::Display) -> HttpResponse {
+pub(crate) fn server_error(what: &str, e: impl std::fmt::Display) -> HttpResponse {
     eprintln!("{}: {}", what, e);
     HttpResponse::InternalServerError().body(what.to_string())
 }

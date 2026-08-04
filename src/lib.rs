@@ -6,7 +6,9 @@ pub mod calibre;
 pub mod config;
 pub mod tls;
 pub mod hash;
+pub mod opds2;
 pub mod routes;
+pub mod routes_v2;
 pub mod pattern;
 
 use actix_web::{web, App, HttpServer};
@@ -48,10 +50,18 @@ fn open_library(library: &str, path: &str) -> Result<Connection> {
     Ok(db)
 }
 
+/// Path segments reserved to orca. Can't serve a library under these.
+const RESERVED: [&str; 2] = ["v2", "health"];
+
 pub fn create_app(config: &'static Config) -> Result<AppState> {
 
     if config.calibre.libraries.is_empty() {
         return Err(anyhow!("no libraries configured under [calibre.libraries]"));
+    }
+
+    // A library named after one of Orca's own routes would be unreachable
+    if let Some(library) = config.calibre.libraries.keys().find(|name| RESERVED.contains(&name.as_str())) {
+        return Err(anyhow!("library '{}': the name is reserved by Orca itself", library));
     }
 
     // Every configured library has to open
@@ -129,6 +139,13 @@ pub async fn run_server(state: AppState) -> std::io::Result<()> {
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(health);
+
+    cfg.service(routes_v2::catalog);
+    cfg.service(routes_v2::library_root);
+    cfg.service(routes_v2::all_books);
+    cfg.service(routes_v2::recently_added);
+    cfg.service(routes_v2::single_book);
+
     cfg.service(index);
     cfg.service(opds);
     cfg.service(tags);

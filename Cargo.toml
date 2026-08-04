@@ -39,6 +39,7 @@ tokio = { version = "1.49", features = ["full"] }
 quick-xml = "0.41"
 actix-http = "3.11"
 tempfile = "3.24"
+boon = "0.6.1"
 
 [lib]
 name = "orca"

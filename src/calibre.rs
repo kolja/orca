@@ -12,7 +12,10 @@ use std::sync::{Mutex, MutexGuard};
 /// How many books are listed in the "Recently Added" category.
 const RECENTLY_ADDED: usize = 50;
 
-const SYNOPSIS_WIDTH: usize = 100;
+pub const SYNOPSIS_WIDTH: usize = 100;
+
+/// no blurb will wrap at this width
+pub const UNWRAPPED: usize = 10_000;
 
 /// Calibre's own default for a book that has never been touched.
 const NEVER_MODIFIED: &str = "2000-01-01 00:00:00+00:00";
@@ -24,6 +27,7 @@ pub struct Book {
     pub title: String,
     pub pubdate: String,
     pub updated: String,
+    /// Calibre's comment, as the HTML it is stored as. `plain_text` renders it.
     pub synopsis: String,
     pub has_cover: bool,
     /// epub, azw3, cbz ...
@@ -31,6 +35,9 @@ pub struct Book {
     pub authors: Vec<Author>,
     /// BCP47 tags
     pub languages: Vec<String>,
+    pub tags: Vec<Tag>,
+    pub publisher: Option<String>,
+    pub series: Option<Series>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,9 +52,22 @@ pub struct Tag {
     pub name: String,
 }
 
-/// Calibre keeps the formats of a book as a comma separated list of uppercase
-/// names. Every one of them is offered for download, whether or not Orca knows
-/// its mime type: a book Orca drops the only format of has nothing to acquire.
+/// The series a book is part of. Calibre lets a book belong to one at most.
+#[derive(Debug, Serialize)]
+pub struct Series {
+    pub name: String,
+    /// Calibre's `series_index`: volume in series (could also be 1.5)
+    pub index: f64,
+}
+
+/// Calibre keeps a blurb as HTML, which neither Atom's `<content type="text">`
+/// nor OPDS 2.0's `description` will take. Rendering is left to the caller.
+pub fn plain_text(html: &str, width: usize) -> String {
+    from_read(html.as_bytes(), width).unwrap_or_default()
+}
+
+/// Calibre keeps book formats as CSV. All are offered for download
+/// no matter if the mime-type is known to orca or not.
 fn parse_formats(concatenated: &str) -> Vec<String> {
     concatenated
         .split(',')
@@ -57,7 +77,6 @@ fn parse_formats(concatenated: &str) -> Vec<String> {
 }
 
 /// The mime type of a Calibre format, as `parse_formats` spells it.
-/// Anything unknown is left to the client to sniff.
 pub fn mime(format: &str) -> &'static str {
     match format {
         "epub" => "application/epub+zip",
@@ -153,13 +172,7 @@ pub fn books(db: &Connection) -> rusqlite::Result<Vec<Book>> {
     )
 }
 
-/// One page of the library, ordered by the sort title Calibre keeps for exactly
-/// this purpose.
-///
-/// `books` leaves the order to SQLite, which costs nothing as long as the whole
-/// library is one feed. A page only means anything if the order is the same on
-/// the next request, or a client paging through the catalog sees some books
-/// twice and others never.
+/// One page of the library, ordered by the sort title Calibre keeps for this purpose.
 pub fn books_page(db: &Connection, limit: usize, offset: usize) -> rusqlite::Result<Vec<Book>> {
     query_books(
         db,
@@ -271,9 +284,13 @@ pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<S
 
 /// The columns every book feed needs.
 /// `GROUP_CONCAT` : a client should not see the download links shuffle between requests
-const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, c.text AS synopsis,
+const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, b.series_index, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format)
-        FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats";
+        FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats,
+    (SELECT s.name FROM books_series_link bs JOIN series s ON bs.series = s.id
+        WHERE bs.book = b.id) AS series,
+    (SELECT p.name FROM books_publishers_link bp JOIN publishers p ON bp.publisher = p.id
+        WHERE bp.book = b.id) AS publisher";
 
 /// Run one of the book queries and map its rows to `Book`s.
 fn query_books(
@@ -283,20 +300,29 @@ fn query_books(
 ) -> rusqlite::Result<Vec<Book>> {
     let mut stmt = db.prepare(sql)?;
     let rows = stmt.query_map(params, |row| {
-        let synopsis: String = row.get("synopsis").unwrap_or_default();
-        let synopsis = from_read(synopsis.as_bytes(), SYNOPSIS_WIDTH).unwrap_or_default();
         let formats = parse_formats(&row.get::<_, String>("formats").unwrap_or_default());
+        // no `series_intex` if the book is not part of a series
+        let series = row
+            .get::<_, Option<String>>("series")
+            .unwrap_or(None)
+            .map(|name| Series {
+                name,
+                index: row.get("series_index").unwrap_or(1.0),
+            });
         Ok(Book {
             id: row.get("id")?,
             uuid: row.get("uuid").unwrap_or_default(),
             title: row.get("title")?,
             pubdate: to_rfc3339(&row.get::<_, String>("pubdate")?),
             updated: to_rfc3339(&row.get::<_, String>("last_modified")?),
-            synopsis,
+            synopsis: row.get("synopsis").unwrap_or_default(),
             has_cover: row.get("has_cover").unwrap_or(false),
             formats,
             authors: Vec::new(),
             languages: Vec::new(),
+            tags: Vec::new(),
+            publisher: row.get("publisher").unwrap_or(None),
+            series,
         })
     })?;
 
@@ -304,9 +330,11 @@ fn query_books(
     let book_ids: Vec<i32> = books.iter().map(|book| book.id).collect();
     let mut authors = authors_by_book(db, &book_ids)?;
     let mut languages = languages_by_book(db, &book_ids)?;
+    let mut tags = tags_by_book(db, &book_ids)?;
     for book in &mut books {
         book.authors = authors.remove(&book.id).unwrap_or_default();
         book.languages = languages.remove(&book.id).unwrap_or_default();
+        book.tags = tags.remove(&book.id).unwrap_or_default();
     }
     Ok(books)
 }
@@ -339,6 +367,34 @@ fn authors_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMa
     })?;
 
     Ok(group_by_book(collect_rows(rows, "book author")))
+}
+
+/// The tags of each of the given books, by book id.
+fn tags_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMap<i32, Vec<Tag>>> {
+    if book_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut stmt = db.prepare(&format!(
+        "SELECT bt.book, t.id, t.name
+            FROM books_tags_link bt
+            JOIN tags t ON bt.tag = t.id
+            WHERE bt.book IN ({})
+            ORDER BY bt.book, t.name;",
+        placeholders(book_ids.len())
+    ))?;
+
+    let rows = stmt.query_map(params_from_iter(book_ids), |row| {
+        Ok((
+            row.get::<_, i32>(0)?,
+            Tag {
+                id: row.get(1)?,
+                name: row.get(2)?,
+            },
+        ))
+    })?;
+
+    Ok(group_by_book(collect_rows(rows, "book tag")))
 }
 
 /// The languages of each of the given books, by book id.
@@ -402,7 +458,7 @@ mod tests {
     }
 
     // Not every language has a two-letter code, and Calibre lets you type
-    // anything into the field. Neither may cost us the whole book.
+    // anything into the field.
     #[test]
     fn languages_without_a_short_code_are_left_alone() {
         assert_eq!(bcp47("haw"), "haw");
@@ -429,7 +485,7 @@ mod tests {
         assert_eq!(mime("azw3"), "application/vnd.amazon.mobi8-ebook");
         assert_eq!(mime("epub"), "application/epub+zip");
         // What Orca cannot name, the client may still know what to do with.
-        assert_eq!(mime("lrf"), "application/octet-stream");
+        assert_eq!(mime("foo"), "application/octet-stream");
     }
 
     // GROUP_CONCAT over no rows is NULL, which reads back as "".
@@ -473,6 +529,45 @@ mod tests {
         assert_eq!(alice.formats, ["azw3", "epub"]);
         assert_eq!(alice.authors[0].name, "Lewis Carroll");
         assert!(alice.has_cover);
+    }
+
+    #[test]
+    fn a_book_carries_the_shelf_it_came_off() {
+        let db = library();
+        let patrol = book(&db, 9).expect("Galactic Patrol");
+
+        let series = patrol.series.expect("a series");
+        assert_eq!(series.name, "Astounding Stories");
+        assert_eq!(series.index, 3.0);
+        assert_eq!(patrol.publisher.as_deref(), Some("Street & Smith"));
+
+        let tags: Vec<&str> = patrol.tags.iter().map(|tag| tag.name.as_str()).collect();
+        assert_eq!(tags, ["science fiction", "space opera"]);
+    }
+
+    // Calibre keeps a `series_index` of 1.0 for every book, series or not, so
+    // only the series itself can say whether the number means anything.
+    #[test]
+    fn a_book_in_no_series_is_in_no_series() {
+        let db = library();
+        assert!(book(&db, 4).expect("Alice").series.is_none());
+    }
+
+    // Neither feed can use the HTML Calibre stores, and the two want it
+    // rendered differently, so a book carries it as it was written.
+    #[test]
+    fn a_blurb_leaves_calibre_as_html() {
+        let db = library();
+        let alice = book(&db, 4).expect("Alice");
+        assert!(alice.synopsis.starts_with("<div>"));
+
+        let wrapped = plain_text(&alice.synopsis, SYNOPSIS_WIDTH);
+        assert!(!wrapped.contains("<div>"));
+        assert!(wrapped.lines().all(|line| line.chars().count() <= SYNOPSIS_WIDTH));
+
+        // The same blurb, without the breaks the 100 columns forced into it.
+        let unwrapped = plain_text(&alice.synopsis, UNWRAPPED);
+        assert!(unwrapped.lines().count() < wrapped.lines().count());
     }
 
     #[test]

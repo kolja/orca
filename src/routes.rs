@@ -47,6 +47,14 @@ fn feed_ctx(req: &HttpRequest, config: &Config, lib: Option<&str>) -> tera::Cont
     ctx
 }
 
+/// Calibre stores a blurb as HTML - Rendering / escaping happens here
+fn wrapped(mut books: Vec<calibre::Book>) -> Vec<calibre::Book> {
+    for book in &mut books {
+        book.synopsis = calibre::plain_text(&book.synopsis, calibre::SYNOPSIS_WIDTH);
+    }
+    books
+}
+
 /// Log a failure and turn it into a 500
 pub(crate) fn server_error(what: &str, e: impl std::fmt::Display) -> HttpResponse {
     eprintln!("{}: {}", what, e);
@@ -220,7 +228,7 @@ async fn books_by_tag(
     };
 
     let books = match calibre::books_by_tag(&db, tag) {
-        Ok(books) => books,
+        Ok(books) => wrapped(books),
         Err(e) => return server_error("Error querying books", e),
     };
 
@@ -269,7 +277,7 @@ async fn books_by_author(
     };
 
     let books = match calibre::books_by_author(&db, author) {
-        Ok(books) => books,
+        Ok(books) => wrapped(books),
         Err(e) => return server_error("Error querying books", e),
     };
 
@@ -294,7 +302,7 @@ async fn getbooks(
     };
 
     let books = match calibre::books(&db) {
-        Ok(books) => books,
+        Ok(books) => wrapped(books),
         Err(e) => return server_error("Error querying books", e),
     };
 
@@ -319,7 +327,7 @@ async fn recently_added(
     };
 
     let books = match calibre::recently_added(&db) {
-        Ok(books) => books,
+        Ok(books) => wrapped(books),
         Err(e) => return server_error("Error querying books", e),
     };
 

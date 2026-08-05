@@ -135,8 +135,8 @@ impl Link {
         self
     }
 
-    /// How many publications wait behind this link. A navigation entry may say
-    /// so, which spares the client a request to find out.
+    /// How many publications wait behind this link.
+    /// A navigation entry may carry this info, sparing the client a request
     pub fn count(mut self, items: usize) -> Self {
         self.properties = Some(Properties {
             number_of_items: items,
@@ -179,12 +179,36 @@ pub struct BookMetadata {
     pub modified: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    /// What the book is about. Names for now; the schema also takes objects,
+    /// which is how a subject will later link to the feed of its own tag.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub subject: Vec<String>,
+    #[serde(rename = "belongsTo", skip_serializing_if = "Option::is_none")]
+    pub belongs_to: Option<BelongsTo>,
 }
 
 /// A contributor may just be a string, but the object could add a link to the author's own feed.
 #[derive(Debug, Serialize)]
 pub struct Contributor {
     pub name: String,
+}
+
+/// The collections a publication is part of. Readium knows many different kinds;
+/// Calibre keeps one, and calls it a series.
+#[derive(Debug, Serialize)]
+pub struct BelongsTo {
+    pub series: Series,
+}
+
+/// A series, and where it sits in this publication.
+#[derive(Debug, Serialize)]
+pub struct Series {
+    pub name: String,
+    /// `series_index` can be 1.5 in Calibre
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<f64>,
 }
 
 #[cfg(test)]
@@ -236,6 +260,44 @@ mod tests {
                 "type": "application/opds+json",
                 "title": "All Books",
                 "properties": { "numberOfItems": 1234 },
+            })
+        );
+    }
+
+    #[test]
+    fn a_book_says_which_series_it_is_a_volume_of() {
+        let metadata = BookMetadata {
+            kind: BOOK,
+            title: "Galactic Patrol".to_string(),
+            identifier: None,
+            author: vec![Contributor {
+                name: "E. E. Smith".to_string(),
+            }],
+            language: Vec::new(),
+            published: None,
+            modified: None,
+            description: None,
+            publisher: Some("Street & Smith".to_string()),
+            subject: vec!["science fiction".to_string()],
+            belongs_to: Some(BelongsTo {
+                series: Series {
+                    name: "Astounding Stories".to_string(),
+                    position: Some(3.0),
+                },
+            }),
+        };
+
+        assert_eq!(
+            to_value(&metadata).unwrap(),
+            json!({
+                "@type": "http://schema.org/Book",
+                "title": "Galactic Patrol",
+                "author": [{ "name": "E. E. Smith" }],
+                "publisher": "Street & Smith",
+                "subject": ["science fiction"],
+                "belongsTo": {
+                    "series": { "name": "Astounding Stories", "position": 3.0 },
+                },
             })
         );
     }

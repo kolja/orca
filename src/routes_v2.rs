@@ -16,8 +16,8 @@ use crate::appstate::AppState;
 use crate::authorized::Authorized;
 use crate::calibre::{self, Book};
 use crate::opds2::{
-    BookMetadata, Contributor, Feed, Link, Publication, ACQUISITION, BOOK, FEED, PUBLICATION,
-    SORT_NEW,
+    BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, ACQUISITION, BOOK, FEED,
+    PUBLICATION, SORT_NEW,
 };
 use crate::routes::{origin, server_error};
 
@@ -136,10 +136,18 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
             language: book.languages.clone(),
             published: Some(book.pubdate.clone()),
             modified: Some(book.updated.clone()),
-            description: match book.synopsis.trim() {
+            description: match calibre::plain_text(&book.synopsis, calibre::UNWRAPPED).trim() {
                 "" => None,
                 synopsis => Some(synopsis.to_string()),
             },
+            publisher: book.publisher.clone(),
+            subject: book.tags.iter().map(|tag| tag.name.clone()).collect(),
+            belongs_to: book.series.as_ref().map(|series| BelongsTo {
+                series: Series {
+                    name: series.name.clone(),
+                    position: Some(series.index),
+                },
+            }),
         },
         links,
         images,

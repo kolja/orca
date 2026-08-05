@@ -12,7 +12,7 @@ use boon::{Compiler, Schemas};
 use once_cell::sync::Lazy;
 use orca::config::{read_config, Config};
 use orca::{create_app, init};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -126,6 +126,46 @@ async fn a_publication_carries_the_metadata_calibre_holds() {
     assert_eq!(alice["images"][0]["type"], "image/jpeg");
 }
 
+#[test]
+async fn a_publication_carries_the_shelf_it_came_off() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let patrol = publication(&app, 9).await;
+
+    validates(&patrol, PUBLICATION);
+    let metadata = &patrol["metadata"];
+    assert_eq!(metadata["publisher"], "Street & Smith");
+    assert_eq!(metadata["subject"], json!(["science fiction", "space opera"]));
+    assert_eq!(metadata["belongsTo"]["series"]["name"], "Astounding Stories");
+    // Third of the three Astounding Stories in the library.
+    assert_eq!(metadata["belongsTo"]["series"]["position"], 3.0);
+}
+
+// no empty `belongsTo`
+#[test]
+async fn a_book_on_no_shelf_belongs_to_nothing() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let alice = publication(&app, 4).await;
+
+    assert!(alice["metadata"].get("belongsTo").is_none());
+    assert!(alice["metadata"].get("publisher").is_some());
+    assert_eq!(alice["metadata"]["subject"], json!(["children", "fantasy", "fiction"]));
+}
+
+// The Atom feed wraps a blurb at 100 columns to fit `<content type="text">`.
+// In JSON the same blurb keeps only the breaks its author wrote.
+#[test]
+async fn a_description_is_not_hard_wrapped() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let alice = publication(&app, 4).await;
+    let description = alice["metadata"]["description"].as_str().expect("description");
+
+    assert!(
+        description.lines().any(|line| line.chars().count() > 100),
+        "the blurb still looks wrapped to 100 columns: {}",
+        description
+    );
+}
+
 // a publication with no acquisition link fails the schema:
 #[test]
 async fn every_format_is_an_acquisition_link() {
@@ -145,8 +185,7 @@ async fn every_format_is_an_acquisition_link() {
     assert_eq!(acquisitions[1]["type"], "application/epub+zip");
 }
 
-// The links of a publication are absolute, and the files themselves stay where
-// OPDS 1.2 put them -- so a v2 client downloads through the same route.
+// OPDS v1.2 and v2 clients downloads through the same route.
 #[test]
 async fn what_a_publication_links_to_can_be_downloaded() {
     let app = setup(&TEST_HTTP_CONFIG).await;

@@ -19,6 +19,10 @@ pub const BOOK: &str = "http://schema.org/Book";
 /// The rel of a link that leads to the book itself.
 pub const ACQUISITION: &str = "http://opds-spec.org/acquisition";
 
+/// The rel of the cover. A client that wants a cover rather than a thumbnail
+/// looks for this rel, and falls back to whatever image it can find.
+pub const IMAGE: &str = "http://opds-spec.org/image";
+
 /// The rel of a feed of what arrived last.
 pub const SORT_NEW: &str = "http://opds-spec.org/sort/new";
 

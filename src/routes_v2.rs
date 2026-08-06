@@ -17,7 +17,7 @@ use crate::authorized::Authorized;
 use crate::calibre::{self, Book};
 use crate::opds2::{
     BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
-    BOOK, FEED, PUBLICATION, SORT_NEW,
+    BOOK, FEED, IMAGE, PUBLICATION, SORT_NEW,
 };
 use crate::routes::{origin, server_error};
 
@@ -115,8 +115,11 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
             .title(format!("{}.{}", book.title, format))
     }));
 
+    // Calibre keeps one cover and no thumbnail, so the one image is the cover.
     let images = match book.has_cover {
-        true => vec![Link::new(format!("{}/{}/cover/{}", base, lib, book.id)).mime("image/jpeg")],
+        true => vec![Link::new(format!("{}/{}/cover/{}", base, lib, book.id))
+            .rel(IMAGE)
+            .mime("image/jpeg")],
         false => Vec::new(),
     };
 

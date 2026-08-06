@@ -243,6 +243,8 @@ async fn a_publication_carries_the_metadata_calibre_holds() {
         alice["metadata"]["identifier"],
         "urn:uuid:8b9f853c-7171-4f09-ba21-7304603a5128"
     );
+    // A client after a cover rather than a thumbnail looks for this rel.
+    assert_eq!(alice["images"][0]["rel"], "http://opds-spec.org/image");
     assert_eq!(alice["images"][0]["type"], "image/jpeg");
 }
 

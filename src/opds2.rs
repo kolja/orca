@@ -181,18 +181,28 @@ pub struct BookMetadata {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub publisher: Option<String>,
-    /// What the book is about. Names for now; the schema also takes objects,
-    /// which is how a subject will later link to the feed of its own tag.
+    /// What the book is about, each subject linking to the feed of its own tag.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub subject: Vec<String>,
+    pub subject: Vec<Subject>,
     #[serde(rename = "belongsTo", skip_serializing_if = "Option::is_none")]
     pub belongs_to: Option<BelongsTo>,
 }
 
-/// A contributor may just be a string, but the object could add a link to the author's own feed.
+/// A contributor may just be a string. The object is what carries the link to
+/// the feed of everything this author wrote.
 #[derive(Debug, Serialize)]
 pub struct Contributor {
     pub name: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<Link>,
+}
+
+/// One thing a publication is about, and where the rest of it is shelved.
+#[derive(Debug, Serialize)]
+pub struct Subject {
+    pub name: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<Link>,
 }
 
 /// The collections a publication is part of. Readium knows many different kinds;
@@ -272,13 +282,17 @@ mod tests {
             identifier: None,
             author: vec![Contributor {
                 name: "E. E. Smith".to_string(),
+                links: Vec::new(),
             }],
             language: Vec::new(),
             published: None,
             modified: None,
             description: None,
             publisher: Some("Street & Smith".to_string()),
-            subject: vec!["science fiction".to_string()],
+            subject: vec![Subject {
+                name: "science fiction".to_string(),
+                links: Vec::new(),
+            }],
             belongs_to: Some(BelongsTo {
                 series: Series {
                     name: "Astounding Stories".to_string(),
@@ -294,10 +308,38 @@ mod tests {
                 "title": "Galactic Patrol",
                 "author": [{ "name": "E. E. Smith" }],
                 "publisher": "Street & Smith",
-                "subject": ["science fiction"],
+                "subject": [{ "name": "science fiction" }],
                 "belongsTo": {
                     "series": { "name": "Astounding Stories", "position": 3.0 },
                 },
+            })
+        );
+    }
+
+    // link to everything else by the same author, or about the same subject.
+    #[test]
+    fn an_author_and_a_subject_lead_somewhere() {
+        let author = Contributor {
+            name: "Lewis Carroll".to_string(),
+            links: vec![Link::new("/v2/library/authors/4").mime(FEED)],
+        };
+        let subject = Subject {
+            name: "fantasy".to_string(),
+            links: vec![Link::new("/v2/library/tags/6").mime(FEED)],
+        };
+
+        assert_eq!(
+            to_value(&author).unwrap(),
+            json!({
+                "name": "Lewis Carroll",
+                "links": [{ "href": "/v2/library/authors/4", "type": "application/opds+json" }],
+            })
+        );
+        assert_eq!(
+            to_value(&subject).unwrap(),
+            json!({
+                "name": "fantasy",
+                "links": [{ "href": "/v2/library/tags/6", "type": "application/opds+json" }],
             })
         );
     }

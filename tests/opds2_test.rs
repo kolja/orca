@@ -12,7 +12,7 @@ use boon::{Compiler, Schemas};
 use once_cell::sync::Lazy;
 use orca::config::{read_config, Config};
 use orca::{create_app, init};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -55,8 +55,110 @@ async fn a_library_offers_its_books() {
 
     validates(&library, FEED);
     assert_eq!(library["metadata"]["title"], "library");
-    assert_eq!(titles(&library["navigation"]), ["All Books", "Recently Added"]);
+    assert_eq!(
+        titles(&library["navigation"]),
+        ["All Books", "Recently Added", "Authors", "Tags"]
+    );
+    // Seven books, by eight authors, under seven tags.
     assert_eq!(library["navigation"][0]["properties"]["numberOfItems"], 7);
+    assert_eq!(library["navigation"][2]["properties"]["numberOfItems"], 8);
+    assert_eq!(library["navigation"][3]["properties"]["numberOfItems"], 7);
+}
+
+// ------- Browsing by author and by tag -------
+
+#[test]
+async fn the_library_can_be_browsed_by_author_and_by_tag() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    for (path, title, first) in [
+        ("/v2/library/authors", "library | Authors", "Lewis Carroll"),
+        ("/v2/library/tags", "library | Tags", "children"),
+    ] {
+        let shelves = feed(&app, path).await;
+        validates(&shelves, FEED);
+        assert_eq!(shelves["metadata"]["title"], title);
+        // Calibre's own order: authors by sort name, tags alphabetically.
+        assert_eq!(titles(&shelves["navigation"])[0], first);
+    }
+}
+
+// A navigation entry doesn't lie about its size
+#[test]
+async fn a_shelf_says_how_much_stands_on_it() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let tags = feed(&app, "/v2/library/tags").await;
+
+    let science_fiction = tags["navigation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|link| link["title"] == "science fiction")
+        .expect("a tag");
+
+    assert_eq!(science_fiction["properties"]["numberOfItems"], 4);
+
+    let books = feed(&app, science_fiction["href"].as_str().unwrap().strip_prefix("http://localhost:8080").unwrap()).await;
+    assert_eq!(books["publications"].as_array().unwrap().len(), 4);
+}
+
+#[test]
+async fn a_shelf_holds_only_what_belongs_on_it() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let carroll = feed(&app, "/v2/library/authors/4").await;
+
+    validates(&carroll, FEED);
+    assert_eq!(carroll["metadata"]["title"], "library | Lewis Carroll");
+    assert_eq!(carroll["metadata"]["numberOfItems"], 1);
+    assert_eq!(
+        carroll["publications"][0]["metadata"]["title"],
+        "Alice's Adventures in Wonderland"
+    );
+}
+
+#[test]
+async fn a_shelf_that_is_not_there_is_404() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    for path in ["/v2/library/authors/99999", "/v2/library/tags/99999"] {
+        assert_eq!(call_authorized(&app, path).await.status(), StatusCode::NOT_FOUND, "{}", path);
+    }
+}
+
+// Every page of a shelf has to page within that shelf, not the whole catalog.
+#[test]
+async fn a_shelf_pages_under_its_own_address() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let books = feed(&app, "/v2/library/tags/9?page=2").await;
+
+    // Four science fiction books fit on one page, so page two is page one.
+    assert_eq!(books["metadata"]["currentPage"], 1);
+    assert_eq!(books["links"][0]["href"], "http://localhost:8080/v2/library/tags/9");
+}
+
+// What a client needs to walk from a book to its neighbours on the shelf.
+#[test]
+async fn an_author_and_a_subject_lead_to_their_own_feeds() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let alice = publication(&app, 4).await;
+
+    let author = &alice["metadata"]["author"][0];
+    assert_eq!(author["name"], "Lewis Carroll");
+    assert_eq!(author["links"][0]["href"], "http://localhost:8080/v2/library/authors/4");
+    assert_eq!(author["links"][0]["type"], "application/opds+json");
+
+    let subject = &alice["metadata"]["subject"][0];
+    assert_eq!(subject["name"], "children");
+    assert_eq!(subject["links"][0]["href"], "http://localhost:8080/v2/library/tags/7");
+
+    // Both lead somewhere that holds the book they came from.
+    for path in ["/v2/library/authors/4", "/v2/library/tags/7"] {
+        let shelf = feed(&app, path).await;
+        assert_eq!(
+            shelf["publications"][0]["metadata"]["title"],
+            "Alice's Adventures in Wonderland"
+        );
+    }
 }
 
 #[test]
@@ -92,7 +194,16 @@ async fn a_book_the_library_does_not_hold_is_404() {
 async fn a_library_that_is_not_there_is_404() {
     let app = setup(&TEST_HTTP_CONFIG).await;
 
-    for path in ["/v2/nope", "/v2/nope/books", "/v2/nope/new", "/v2/nope/book/4"] {
+    for path in [
+        "/v2/nope",
+        "/v2/nope/books",
+        "/v2/nope/new",
+        "/v2/nope/book/4",
+        "/v2/nope/authors",
+        "/v2/nope/authors/4",
+        "/v2/nope/tags",
+        "/v2/nope/tags/9",
+    ] {
         assert_eq!(call_authorized(&app, path).await.status(), StatusCode::NOT_FOUND, "{}", path);
     }
 }
@@ -101,7 +212,16 @@ async fn a_library_that_is_not_there_is_404() {
 async fn opds2_is_no_more_public_than_opds1() {
     let app = setup(&TEST_HTTP_CONFIG).await;
 
-    for path in ["/v2", "/v2/library", "/v2/library/books", "/v2/library/book/4"] {
+    for path in [
+        "/v2",
+        "/v2/library",
+        "/v2/library/books",
+        "/v2/library/book/4",
+        "/v2/library/authors",
+        "/v2/library/authors/4",
+        "/v2/library/tags",
+        "/v2/library/tags/9",
+    ] {
         assert_eq!(call(&app, path).await.status(), StatusCode::UNAUTHORIZED, "{}", path);
     }
 }
@@ -134,7 +254,7 @@ async fn a_publication_carries_the_shelf_it_came_off() {
     validates(&patrol, PUBLICATION);
     let metadata = &patrol["metadata"];
     assert_eq!(metadata["publisher"], "Street & Smith");
-    assert_eq!(metadata["subject"], json!(["science fiction", "space opera"]));
+    assert_eq!(names(&metadata["subject"]), ["science fiction", "space opera"]);
     assert_eq!(metadata["belongsTo"]["series"]["name"], "Astounding Stories");
     // Third of the three Astounding Stories in the library.
     assert_eq!(metadata["belongsTo"]["series"]["position"], 3.0);
@@ -148,7 +268,7 @@ async fn a_book_on_no_shelf_belongs_to_nothing() {
 
     assert!(alice["metadata"].get("belongsTo").is_none());
     assert!(alice["metadata"].get("publisher").is_some());
-    assert_eq!(alice["metadata"]["subject"], json!(["children", "fantasy", "fiction"]));
+    assert_eq!(names(&alice["metadata"]["subject"]), ["children", "fantasy", "fiction"]);
 }
 
 // The Atom feed wraps a blurb at 100 columns to fit `<content type="text">`.
@@ -313,6 +433,10 @@ async fn publication(
 
 fn titles(links: &Value) -> Vec<String> {
     collect(links, "title")
+}
+
+fn names(values: &Value) -> Vec<String> {
+    collect(values, "name")
 }
 
 fn rels(links: &Value) -> Vec<String> {

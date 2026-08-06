@@ -52,6 +52,15 @@ pub struct Tag {
     pub name: String,
 }
 
+/// One of the categories Calibre files a library under -- an author or a tag
+/// This is the signpost / link. `Author` and `Tag` belong to a book, count lives here
+#[derive(Debug, Serialize)]
+pub struct Category {
+    pub id: i32,
+    pub name: String,
+    pub books: usize,
+}
+
 /// The series a book is part of. Calibre lets a book belong to one at most.
 #[derive(Debug, Serialize)]
 pub struct Series {
@@ -159,6 +168,60 @@ pub fn tags(db: &Connection) -> rusqlite::Result<Vec<Tag>> {
     Ok(collect_rows(rows, "tag"))
 }
 
+/// Every author that has a book in the library
+pub fn authors_with_books(db: &Connection) -> rusqlite::Result<Vec<Category>> {
+    categories(
+        db,
+        "SELECT a.id, a.name, COUNT(ba.book) AS books
+            FROM authors a
+            JOIN books_authors_link ba ON a.id = ba.author
+            GROUP BY a.id
+            ORDER BY a.sort;",
+    )
+}
+
+/// Every tag with a book to it in the library, alphabetically.
+pub fn tags_with_books(db: &Connection) -> rusqlite::Result<Vec<Category>> {
+    categories(
+        db,
+        "SELECT t.id, t.name, COUNT(bt.book) AS books
+            FROM tags t
+            JOIN books_tags_link bt ON t.id = bt.tag
+            GROUP BY t.id
+            ORDER BY t.name;",
+    )
+}
+
+fn categories(db: &Connection, sql: &str) -> rusqlite::Result<Vec<Category>> {
+    let mut stmt = db.prepare(sql)?;
+    let rows = stmt.query_map(params![], |row| {
+        Ok(Category {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            books: row.get::<_, i64>(2)? as usize,
+        })
+    })?;
+    Ok(collect_rows(rows, "category"))
+}
+
+/// The name of one author, or `QueryReturnedNoRows`
+pub fn author_name(db: &Connection, id: i32) -> rusqlite::Result<String> {
+    name_of(db, "authors", id)
+}
+
+/// The name of one tag, or `QueryReturnedNoRows`.
+pub fn tag_name(db: &Connection, id: i32) -> rusqlite::Result<String> {
+    name_of(db, "tags", id)
+}
+
+fn name_of(db: &Connection, table: &str, id: i32) -> rusqlite::Result<String> {
+    db.query_row(
+        &format!("SELECT name FROM {} WHERE id = ?1;", table),
+        params![id],
+        |row| row.get(0),
+    )
+}
+
 pub fn books(db: &Connection) -> rusqlite::Result<Vec<Book>> {
     query_books(
         db,
@@ -189,8 +252,32 @@ pub fn books_page(db: &Connection, limit: usize, offset: usize) -> rusqlite::Res
 
 /// How many books the library holds, for the `numberOfItems` of a feed.
 pub fn count_books(db: &Connection) -> rusqlite::Result<usize> {
-    let total: i64 = db.query_row("SELECT COUNT(*) FROM books;", params![], |row| row.get(0))?;
-    Ok(total as usize)
+    count(db, "SELECT COUNT(*) FROM books;", params![])
+}
+
+/// The size of each way into the library. Counted in one go
+#[derive(Debug, Serialize)]
+pub struct Counts {
+    pub books: usize,
+    /// Only authors and tags related to a book
+    pub authors: usize,
+    pub tags: usize,
+}
+
+pub fn counts(db: &Connection) -> rusqlite::Result<Counts> {
+    db.query_row(
+        "SELECT (SELECT COUNT(*) FROM books),
+                (SELECT COUNT(DISTINCT author) FROM books_authors_link),
+                (SELECT COUNT(DISTINCT tag) FROM books_tags_link);",
+        params![],
+        |row| {
+            Ok(Counts {
+                books: row.get::<_, i64>(0)? as usize,
+                authors: row.get::<_, i64>(1)? as usize,
+                tags: row.get::<_, i64>(2)? as usize,
+            })
+        },
+    )
 }
 
 /// A single book, or `QueryReturnedNoRows` for one this library does not hold.
@@ -256,6 +343,63 @@ pub fn books_by_author(db: &Connection, author: i32) -> rusqlite::Result<Vec<Boo
         ),
         params![author],
     )
+}
+
+/// One page of the books with a tag, in the order the whole library is in.
+pub fn books_by_tag_page(
+    db: &Connection,
+    tag: i32,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                JOIN books_tags_link bt ON b.id = bt.book
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE bt.tag = ?1 GROUP BY b.id
+                ORDER BY b.sort LIMIT ?2 OFFSET ?3;",
+            BOOK_COLUMNS
+        ),
+        params![tag, limit as i64, offset as i64],
+    )
+}
+
+/// One page of an author's books, in the order the whole library is in.
+pub fn books_by_author_page(
+    db: &Connection,
+    author: i32,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                JOIN books_authors_link ba ON b.id = ba.book
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE ba.author = ?1 GROUP BY b.id
+                ORDER BY b.sort LIMIT ?2 OFFSET ?3;",
+            BOOK_COLUMNS
+        ),
+        params![author, limit as i64, offset as i64],
+    )
+}
+
+pub fn count_books_by_tag(db: &Connection, tag: i32) -> rusqlite::Result<usize> {
+    count(db, "SELECT COUNT(DISTINCT book) FROM books_tags_link WHERE tag = ?1;", params![tag])
+}
+
+pub fn count_books_by_author(db: &Connection, author: i32) -> rusqlite::Result<usize> {
+    count(db, "SELECT COUNT(DISTINCT book) FROM books_authors_link WHERE author = ?1;", params![author])
+}
+
+fn count(db: &Connection, sql: &str, params: impl rusqlite::Params) -> rusqlite::Result<usize> {
+    let total: i64 = db.query_row(sql, params, |row| row.get(0))?;
+    Ok(total as usize)
 }
 
 /// Where a book's cover lives, relative to the library directory.
@@ -518,6 +662,77 @@ mod tests {
         // Seven books, pages of two: the last one holds the remainder.
         assert_eq!(ids(books_page(&db, 2, 6).expect("last page")), [2]);
         assert!(books_page(&db, 10, 7).expect("past the end").is_empty());
+    }
+
+    #[test]
+    fn a_category_carries_the_size_of_the_feed_behind_it() {
+        let db = library();
+        let tags = tags_with_books(&db).expect("tags");
+
+        let names: Vec<&str> = tags.iter().map(|tag| tag.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["children", "fantasy", "fiction", "horror", "philosophy", "science fiction", "space opera"]
+        );
+
+        let science_fiction = tags.iter().find(|tag| tag.name == "science fiction").expect("a tag");
+        assert_eq!(science_fiction.books, 4);
+        assert_eq!(count_books_by_tag(&db, science_fiction.id).expect("count"), 4);
+    }
+
+    // Calibre's author order (not alphabetical): Толстой is last.
+    #[test]
+    fn authors_are_listed_the_way_calibre_sorts_them() {
+        let db = library();
+        let authors = authors_with_books(&db).expect("authors");
+
+        let names: Vec<&str> = authors.iter().map(|author| author.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Lewis Carroll",
+                "Galileo Galilei",
+                "Immanuel Kant",
+                "Johannes Kepler",
+                "H. P. Lovecraft",
+                "E. E. Smith",
+                "Sewell Peaslee Wright",
+                "Алексей Николаевич Толстой",
+            ]
+        );
+        assert!(authors.iter().all(|author| author.books == 1));
+    }
+
+    // Every page of a category is a window on the same order, the same as the
+    // pages of the whole library.
+    #[test]
+    fn a_category_is_paged_like_the_library() {
+        let db = library();
+        let ids = |books: Vec<Book>| books.iter().map(|book| book.id).collect::<Vec<_>>();
+
+        // The four science fiction books, in the library's own order.
+        assert_eq!(count_books_by_tag(&db, 9).expect("count"), 4);
+        assert_eq!(ids(books_by_tag_page(&db, 9, 2, 0).expect("first page")), [8, 9]);
+        assert_eq!(ids(books_by_tag_page(&db, 9, 2, 2).expect("second page")), [7, 2]);
+
+        assert_eq!(count_books_by_author(&db, 4).expect("count"), 1);
+        assert_eq!(ids(books_by_author_page(&db, 4, 50, 0).expect("Carroll")), [4]);
+    }
+
+    // A feed titled after an author who is not there would have no title.
+    #[test]
+    fn a_category_that_is_not_there_is_no_rows() {
+        let db = library();
+        assert_eq!(author_name(&db, 4).expect("Carroll"), "Lewis Carroll");
+        assert_eq!(tag_name(&db, 9).expect("a tag"), "science fiction");
+        assert!(matches!(
+            author_name(&db, 99999),
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        ));
+        assert!(matches!(
+            tag_name(&db, 99999),
+            Err(rusqlite::Error::QueryReturnedNoRows)
+        ));
     }
 
     #[test]

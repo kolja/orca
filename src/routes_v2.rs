@@ -16,8 +16,8 @@ use crate::appstate::AppState;
 use crate::authorized::Authorized;
 use crate::calibre::{self, Book};
 use crate::opds2::{
-    BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, ACQUISITION, BOOK, FEED,
-    PUBLICATION, SORT_NEW,
+    BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
+    BOOK, FEED, PUBLICATION, SORT_NEW,
 };
 use crate::routes::{origin, server_error};
 
@@ -66,19 +66,18 @@ struct Window {
     offset: usize,
 }
 
-/// The address of one page of the book feed. Page one keeps the bare URL, so
-/// that the link a client bookmarks and the `first` link it is given agree.
-fn page_url(base: &str, lib: &str, page: usize) -> String {
+/// The address of one page of a feed. Page one keeps the bare URL
+fn page_url(base: &str, lib: &str, feed: &str, page: usize) -> String {
     match page {
-        1 => format!("{}/v2/{}/books", base, lib),
-        n => format!("{}/v2/{}/books?page={}", base, lib, n),
+        1 => format!("{}/v2/{}/{}", base, lib, feed),
+        n => format!("{}/v2/{}/{}?page={}", base, lib, feed, n),
     }
 }
 
-/// The links from one page of the book feed to its neighbours.
-fn page_links(base: &str, lib: &str, window: &Window) -> Vec<Link> {
+/// The links from one page of a book feed to its neighbours.
+fn page_links(base: &str, lib: &str, feed: &str, window: &Window) -> Vec<Link> {
     let sibling = |rel: &str, number: usize| {
-        Link::new(page_url(base, lib, number))
+        Link::new(page_url(base, lib, feed, number))
             .rel(rel.to_string())
             .mime(FEED)
     };
@@ -126,11 +125,15 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
             kind: BOOK,
             title: book.title.clone(),
             identifier: Some(identifier(book, lib)),
+            // link from a book to the rest of what its author wrote.
             author: book
                 .authors
                 .iter()
                 .map(|author| Contributor {
                     name: author.name.clone(),
+                    links: vec![
+                        Link::new(format!("{}/v2/{}/authors/{}", base, lib, author.id)).mime(FEED),
+                    ],
                 })
                 .collect(),
             language: book.languages.clone(),
@@ -141,7 +144,14 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
                 synopsis => Some(synopsis.to_string()),
             },
             publisher: book.publisher.clone(),
-            subject: book.tags.iter().map(|tag| tag.name.clone()).collect(),
+            subject: book
+                .tags
+                .iter()
+                .map(|tag| Subject {
+                    name: tag.name.clone(),
+                    links: vec![Link::new(format!("{}/v2/{}/tags/{}", base, lib, tag.id)).mime(FEED)],
+                })
+                .collect(),
             belongs_to: book.series.as_ref().map(|series| BelongsTo {
                 series: Series {
                     name: series.name.clone(),
@@ -207,29 +217,144 @@ async fn library_root(
         Err(response) => return response,
     };
 
-    let total = match calibre::count_books(&db) {
-        Ok(total) => total,
-        Err(e) => return server_error("Error counting books", e),
+    let counts = match calibre::counts(&db) {
+        Ok(counts) => counts,
+        Err(e) => return server_error("Error counting the library", e),
     };
 
     let base = origin(&req, data.config);
-    let navigation = vec![
-        Link::new(page_url(&base, &lib, 1))
+    let browse = |feed: &str, title: &str, count: usize| {
+        Link::new(page_url(&base, &lib, feed, 1))
             .rel("subsection")
             .mime(FEED)
-            .title("All Books")
-            .count(total),
+            .title(title.to_string())
+            .count(count)
+    };
+
+    let mut navigation = vec![
+        browse(Shelf::Everything.feed(), "All Books", counts.books),
         Link::new(format!("{}/v2/{}/new", base, lib))
             .rel(SORT_NEW)
             .mime(FEED)
             .title("Recently Added"),
     ];
 
+    // A library nobody has tagged should not offer a way in that leads nowhere.
+    if counts.authors > 0 {
+        navigation.push(browse(feed_of(Shelf::Author), "Authors", counts.authors));
+    }
+    if counts.tags > 0 {
+        navigation.push(browse(feed_of(Shelf::Tag), "Tags", counts.tags));
+    }
+
     let root = feed(lib.clone(), format!("{}/v2/{}", base, lib), &base)
         .modified(calibre::updated(&db))
         .navigation(navigation);
 
     json(&root, FEED)
+}
+
+/// a `shelf` carries no books -- it says only how to ask Calibre and what to call the result.
+/// paging works identical on all of them.
+enum Shelf {
+    Everything,
+    Author(i32),
+    Tag(i32),
+}
+
+impl Shelf {
+    /// The feed every shelf of this kind lives in, below the library. The only
+    /// place these path segments are spelled out.
+    fn feed(&self) -> &'static str {
+        match self {
+            Shelf::Everything => "books",
+            Shelf::Author(_) => "authors",
+            Shelf::Tag(_) => "tags",
+        }
+    }
+
+    /// Where this one shelf lives below the library.
+    fn path(&self) -> String {
+        match self {
+            Shelf::Everything => self.feed().to_string(),
+            Shelf::Author(id) | Shelf::Tag(id) => format!("{}/{}", self.feed(), id),
+        }
+    }
+
+    /// What to call this feed. `QueryReturnedNoRows` for a shelf the library does not have.
+    fn name(&self, db: &Connection) -> rusqlite::Result<String> {
+        match self {
+            Shelf::Everything => Ok("All Books".to_string()),
+            Shelf::Author(id) => calibre::author_name(db, *id),
+            Shelf::Tag(id) => calibre::tag_name(db, *id),
+        }
+    }
+
+    fn count(&self, db: &Connection) -> rusqlite::Result<usize> {
+        match self {
+            Shelf::Everything => calibre::count_books(db),
+            Shelf::Author(id) => calibre::count_books_by_author(db, *id),
+            Shelf::Tag(id) => calibre::count_books_by_tag(db, *id),
+        }
+    }
+
+    fn books(&self, db: &Connection, limit: usize, offset: usize) -> rusqlite::Result<Vec<Book>> {
+        match self {
+            Shelf::Everything => calibre::books_page(db, limit, offset),
+            Shelf::Author(id) => calibre::books_by_author_page(db, *id, limit, offset),
+            Shelf::Tag(id) => calibre::books_by_tag_page(db, *id, limit, offset),
+        }
+    }
+}
+
+/// One page of books, whichever shelf they come off.
+fn books_feed(
+    data: &AppState,
+    req: &HttpRequest,
+    lib: &str,
+    shelf: Shelf,
+    requested: usize,
+) -> HttpResponse {
+    let db = match library(data, lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let name = match shelf.name(&db) {
+        Ok(name) => name,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return HttpResponse::NotFound().body(format!("Nothing shelved under {}", shelf.path()))
+        }
+        Err(e) => return server_error("Error querying shelf", e),
+    };
+
+    let total = match shelf.count(&db) {
+        Ok(total) => total,
+        Err(e) => return server_error("Error counting books", e),
+    };
+    let window = window(total, PER_PAGE, requested);
+
+    let books = match shelf.books(&db, PER_PAGE, window.offset) {
+        Ok(books) => books,
+        Err(e) => return server_error("Error querying books", e),
+    };
+
+    let base = origin(req, data.config);
+    let path = shelf.path();
+    let mut page = feed(
+        format!("{} | {}", lib, name),
+        page_url(&base, lib, &path, window.current),
+        &base,
+    )
+    .modified(calibre::updated(&db))
+    .page(total, PER_PAGE, window.current)
+    .publications(books.iter().map(|book| publication(book, lib, &base)).collect());
+
+    for link in page_links(&base, lib, &path, &window) {
+        page = page.link(link);
+    }
+
+    json(&page, FEED)
 }
 
 /// Every book in the library, a page at a time.
@@ -242,42 +367,119 @@ async fn all_books(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Everything, query.page.unwrap_or(1))
+}
+
+/// Everything one author wrote.
+#[actix_web::get("/v2/{lib}/authors/{id}")]
+async fn books_by_author(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, author) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Author(author), query.page.unwrap_or(1))
+}
+
+/// Everything under one tag.
+#[actix_web::get("/v2/{lib}/tags/{id}")]
+async fn books_by_tag(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, tag) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Tag(tag), query.page.unwrap_or(1))
+}
+
+/// The feed a kind of shelf lives in: `authors` for `Shelf::Author`
+fn feed_of(shelf: fn(i32) -> Shelf) -> &'static str {
+    shelf(0).feed()
+}
+
+/// One navigation entry per category, each leading to the shelf of its books.
+/// `shelf` is the variant those entries lead to -- `Shelf::Author` for the feed of authors
+fn shelves(
+    base: &str,
+    lib: &str,
+    title: &str,
+    shelf: fn(i32) -> Shelf,
+    categories: &[calibre::Category],
+    modified: String,
+) -> Feed {
+    let navigation = categories
+        .iter()
+        .map(|category| {
+            Link::new(page_url(base, lib, &shelf(category.id).path(), 1))
+                .rel("subsection")
+                .mime(FEED)
+                .title(category.name.clone())
+                .count(category.books)
+        })
+        .collect();
+
+    feed(
+        format!("{} | {}", lib, title),
+        page_url(base, lib, feed_of(shelf), 1),
+        base,
+    )
+    .modified(modified)
+    .navigation(navigation)
+}
+
+/// Who the library has books by.
+#[actix_web::get("/v2/{lib}/authors")]
+async fn authors(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
     let db = match library(&data, &lib) {
         Ok(db) => db,
         Err(response) => return response,
     };
 
-    let total = match calibre::count_books(&db) {
-        Ok(total) => total,
-        Err(e) => return server_error("Error counting books", e),
-    };
-    let window = window(total, PER_PAGE, query.page.unwrap_or(1));
-
-    let books = match calibre::books_page(&db, PER_PAGE, window.offset) {
-        Ok(books) => books,
-        Err(e) => return server_error("Error querying books", e),
+    let entries = match calibre::authors_with_books(&db) {
+        Ok(entries) => entries,
+        Err(e) => return server_error("Error querying authors", e),
     };
 
     let base = origin(&req, data.config);
-    let mut page = feed(
-        format!("{} | All Books", lib),
-        page_url(&base, &lib, window.current),
-        &base,
+    json(
+        &shelves(&base, &lib, "Authors", Shelf::Author, &entries, calibre::updated(&db)),
+        FEED,
     )
-    .modified(calibre::updated(&db))
-    .page(total, PER_PAGE, window.current)
-    .publications(
-        books
-            .iter()
-            .map(|book| publication(book, &lib, &base))
-            .collect(),
-    );
+}
 
-    for link in page_links(&base, &lib, &window) {
-        page = page.link(link);
-    }
+#[actix_web::get("/v2/{lib}/tags")]
+async fn tags(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
 
-    json(&page, FEED)
+    let entries = match calibre::tags_with_books(&db) {
+        Ok(entries) => entries,
+        Err(e) => return server_error("Error querying tags", e),
+    };
+
+    let base = origin(&req, data.config);
+    json(
+        &shelves(&base, &lib, "Tags", Shelf::Tag, &entries, calibre::updated(&db)),
+        FEED,
+    )
 }
 
 /// The newest arrivals, in the order they arrived.
@@ -388,7 +590,7 @@ mod tests {
     #[test]
     fn a_page_links_to_the_pages_around_it() {
         let rels = |total, requested| {
-            page_links("https://books.example", "lib", &window(total, 50, requested))
+            page_links("https://books.example", "lib", "books", &window(total, 50, requested))
                 .iter()
                 .map(|link| link.rel.clone().unwrap_or_default())
                 .collect::<Vec<_>>()
@@ -403,7 +605,7 @@ mod tests {
 
     #[test]
     fn the_pages_around_a_page_are_the_ones_beside_it() {
-        let links = page_links("https://books.example", "lib", &window(120, 50, 2));
+        let links = page_links("https://books.example", "lib", "books", &window(120, 50, 2));
         let href = |n: usize| links[n].href.as_str();
 
         assert_eq!(href(0), "https://books.example/v2/lib/books");
@@ -414,7 +616,22 @@ mod tests {
 
     #[test]
     fn only_the_first_page_wears_a_bare_url() {
-        assert_eq!(page_url("https://books.example", "lib", 1), "https://books.example/v2/lib/books");
-        assert_eq!(page_url("https://books.example", "lib", 2), "https://books.example/v2/lib/books?page=2");
+        assert_eq!(page_url("https://books.example", "lib", "books", 1), "https://books.example/v2/lib/books");
+        assert_eq!(page_url("https://books.example", "lib", "books", 2), "https://books.example/v2/lib/books?page=2");
+    }
+
+    // A shelf is paged the same way the library is, and its pages are pages of
+    // the shelf rather than of the catalog.
+    #[test]
+    fn a_shelf_pages_under_its_own_address() {
+        let path = Shelf::Author(5).path();
+        assert_eq!(path, "authors/5");
+        assert_eq!(Shelf::Tag(9).path(), "tags/9");
+        assert_eq!(Shelf::Everything.path(), "books");
+
+        assert_eq!(
+            page_url("https://books.example", "lib", &path, 2),
+            "https://books.example/v2/lib/authors/5?page=2"
+        );
     }
 }

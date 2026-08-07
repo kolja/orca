@@ -389,6 +389,55 @@ pub fn books_by_author_page(
     )
 }
 
+/// search for title or author
+const SEARCH_MATCH: &str = "b.id IN (
+        SELECT s.id FROM books s WHERE s.title LIKE ?1 ESCAPE '\\'
+        UNION
+        SELECT ba.book FROM books_authors_link ba
+            JOIN authors a ON ba.author = a.id
+            WHERE a.name LIKE ?1 ESCAPE '\\')";
+
+/// wildcards and special characters are treated literally
+pub fn like(term: &str) -> String {
+    let escaped: String = term
+        .chars()
+        .flat_map(|c| match c {
+            '\\' | '%' | '_' => vec!['\\', c],
+            c => vec![c],
+        })
+        .collect();
+    format!("%{}%", escaped)
+}
+
+/// One page of the books a term matches
+pub fn books_search_page(
+    db: &Connection,
+    term: &str,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE {}
+                ORDER BY b.sort LIMIT ?2 OFFSET ?3;",
+            BOOK_COLUMNS, SEARCH_MATCH
+        ),
+        params![like(term), limit as i64, offset as i64],
+    )
+}
+
+pub fn count_books_matching(db: &Connection, term: &str) -> rusqlite::Result<usize> {
+    count(
+        db,
+        &format!("SELECT COUNT(*) FROM books b WHERE {};", SEARCH_MATCH),
+        params![like(term)],
+    )
+}
+
 pub fn count_books_by_tag(db: &Connection, tag: i32) -> rusqlite::Result<usize> {
     count(db, "SELECT COUNT(DISTINCT book) FROM books_tags_link WHERE tag = ?1;", params![tag])
 }
@@ -827,5 +876,54 @@ mod tests {
     fn a_feed_with_no_books_asks_for_no_authors() {
         let db = library();
         assert!(books_by_tag(&db, 99999).expect("no books").is_empty());
+    }
+
+    // a wildcard is just a regular character.
+    #[test]
+    fn a_search_term_is_taken_literally() {
+        assert_eq!(like("alice"), "%alice%");
+        assert_eq!(like("100%"), "%100\\%%");
+        assert_eq!(like("_"), "%\\_%");
+        assert_eq!(like("a\\b"), "%a\\\\b%");
+    }
+
+    // A quote is a character in a title, not SQL
+    #[test]
+    fn an_apostrophe_is_part_of_the_search_term() {
+        let db = library();
+        assert_eq!(like("Alice's"), "%Alice's%");
+        assert_eq!(count_books_matching(&db, "Alice's").expect("count"), 1);
+    }
+
+    #[test]
+    fn a_search_looks_at_the_title_and_at_the_author() {
+        let db = library();
+        let titles = |term: &str| {
+            books_search_page(&db, term, 50, 0)
+                .expect("search")
+                .into_iter()
+                .map(|book| book.title)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(titles("wonderland"), ["Alice's Adventures in Wonderland"]);
+        // By the author's name, and regardless of case.
+        assert_eq!(titles("LOVECRAFT"), ["At the Mountains of Madness"]);
+        assert!(titles("nothing here at all").is_empty());
+    }
+
+    // Galileo is the author and his name also appears in the title. Still the book is only listed once.
+    #[test]
+    fn a_book_matched_twice_is_found_once() {
+        let db = library();
+        assert_eq!(books_search_page(&library(), "galilei", 50, 0).expect("search").len(), 1);
+        assert_eq!(count_books_matching(&db, "galilei").expect("count"), 1);
+    }
+
+    // `%` would otherwise match the whole library.
+    #[test]
+    fn a_wildcard_matches_nothing_it_does_not_spell() {
+        let db = library();
+        assert_eq!(count_books_matching(&db, "%").expect("count"), 0);
     }
 }

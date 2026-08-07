@@ -94,6 +94,15 @@ fn not_found_or_500(missing: &'static str) -> impl Fn(rusqlite::Error) -> Error 
     }
 }
 
+fn missing_shelf(kind: &str, id: i32, e: rusqlite::Error) -> HttpResponse {
+    match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            HttpResponse::NotFound().body(format!("No {} with id {}", kind, id))
+        }
+        e => server_error("Error querying shelf", e),
+    }
+}
+
 fn attachment(path: &str) -> Result<fs::NamedFile, Error> {
     let file = fs::NamedFile::open(path).map_err(actix_web::error::ErrorInternalServerError)?;
     Ok(file
@@ -227,6 +236,10 @@ async fn books_by_tag(
         None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
     };
 
+    if let Err(e) = calibre::tag_name(&db, tag) {
+        return missing_shelf("tag", tag, e);
+    }
+
     let books = match calibre::books_by_tag(&db, tag) {
         Ok(books) => wrapped(books),
         Err(e) => return server_error("Error querying books", e),
@@ -275,6 +288,10 @@ async fn books_by_author(
         Some(db) => calibre::lock(db),
         None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
     };
+
+    if let Err(e) = calibre::author_name(&db, author) {
+        return missing_shelf("author", author, e);
+    }
 
     let books = match calibre::books_by_author(&db, author) {
         Ok(books) => wrapped(books),

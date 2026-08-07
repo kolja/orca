@@ -1,11 +1,11 @@
 src/authorized.rs 32 33
-src/calibre.rs 187 190
+src/calibre.rs 198 201
 src/config.rs 43 50
 src/hash.rs 14 14
-src/lib.rs 77 79
+src/lib.rs 78 80
 src/main.rs 0 13
-src/opds2.rs 36 36
+src/opds2.rs 41 41
 src/pattern.rs 19 19
-src/routes.rs 152 170
-src/routes_v2.rs 208 220
+src/routes.rs 159 178
+src/routes_v2.rs 237 250
 src/tls.rs 13 13

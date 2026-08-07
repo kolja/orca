@@ -7,6 +7,7 @@
 //! however, `/{lib}/cover/{id}` and `/{lib}/file/{id}/{format}` are plain HTTP downloads
 
 use actix_web::{web, HttpRequest, HttpResponse, Responder};
+use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use rusqlite::Connection;
 use serde::Serialize;
 use serde_derive::Deserialize;
@@ -17,7 +18,7 @@ use crate::authorized::Authorized;
 use crate::calibre::{self, Book};
 use crate::opds2::{
     BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
-    BOOK, FEED, IMAGE, PUBLICATION, SORT_NEW,
+    BOOK, FEED, IMAGE, PUBLICATION, SEARCH, SORT_NEW,
 };
 use crate::routes::{origin, server_error};
 
@@ -26,6 +27,12 @@ const PER_PAGE: usize = 50;
 
 #[derive(Deserialize)]
 struct PageQuery {
+    page: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    query: Option<String>,
     page: Option<usize>,
 }
 
@@ -39,6 +46,17 @@ fn library<'a>(data: &'a AppState, lib: &str) -> Result<MutexGuard<'a, Connectio
 
 fn feed(title: impl Into<String>, self_url: String, base: &str) -> Feed {
     Feed::new(title, self_url).link(Link::new(format!("{}/v2", base)).rel("start").mime(FEED))
+}
+
+/// A feed that stands inside one library also says how to search that library.
+/// has to be `query`: apparently this is the one the ecosystem settled on
+fn library_feed(title: impl Into<String>, self_url: String, base: &str, lib: &str) -> Feed {
+    feed(title, self_url, base).link(
+        Link::new(format!("{}/v2/{}/search?query={{query}}", base, lib))
+            .rel(SEARCH)
+            .mime(FEED)
+            .templated(),
+    )
 }
 
 fn json(value: &impl Serialize, mime: &str) -> HttpResponse {
@@ -66,11 +84,18 @@ struct Window {
     offset: usize,
 }
 
-/// The address of one page of a feed. Page one keeps the bare URL
+/// join with whichever separator is still free (there may already be a query, e.g. search)
 fn page_url(base: &str, lib: &str, feed: &str, page: usize) -> String {
+    let url = format!("{}/v2/{}/{}", base, lib, feed);
     match page {
-        1 => format!("{}/v2/{}/{}", base, lib, feed),
-        n => format!("{}/v2/{}/{}?page={}", base, lib, feed, n),
+        1 => url,
+        n => {
+            let separator = match feed.contains('?') {
+                true => '&',
+                false => '?',
+            };
+            format!("{}{}page={}", url, separator, n)
+        }
     }
 }
 
@@ -250,7 +275,7 @@ async fn library_root(
         navigation.push(browse(feed_of(Shelf::Tag), "Tags", counts.tags));
     }
 
-    let root = feed(lib.clone(), format!("{}/v2/{}", base, lib), &base)
+    let root = library_feed(lib.clone(), format!("{}/v2/{}", base, lib), &base, &lib)
         .modified(calibre::updated(&db))
         .navigation(navigation);
 
@@ -263,6 +288,8 @@ enum Shelf {
     Everything,
     Author(i32),
     Tag(i32),
+    /// a term nothing matches is an empty shelf, not a 404.
+    Search(String),
 }
 
 impl Shelf {
@@ -273,6 +300,7 @@ impl Shelf {
             Shelf::Everything => "books",
             Shelf::Author(_) => "authors",
             Shelf::Tag(_) => "tags",
+            Shelf::Search(_) => "search",
         }
     }
 
@@ -281,6 +309,9 @@ impl Shelf {
         match self {
             Shelf::Everything => self.feed().to_string(),
             Shelf::Author(id) | Shelf::Tag(id) => format!("{}/{}", self.feed(), id),
+            // The term is part of the address, so every page of a search finds
+            // its way back to the same books.
+            Shelf::Search(term) => format!("{}?query={}", self.feed(), encoded(term)),
         }
     }
 
@@ -290,6 +321,10 @@ impl Shelf {
             Shelf::Everything => Ok("All Books".to_string()),
             Shelf::Author(id) => calibre::author_name(db, *id),
             Shelf::Tag(id) => calibre::tag_name(db, *id),
+            Shelf::Search(term) => Ok(match term.trim() {
+                "" => "Search".to_string(),
+                term => format!("Search: {}", term),
+            }),
         }
     }
 
@@ -298,6 +333,8 @@ impl Shelf {
             Shelf::Everything => calibre::count_books(db),
             Shelf::Author(id) => calibre::count_books_by_author(db, *id),
             Shelf::Tag(id) => calibre::count_books_by_tag(db, *id),
+            Shelf::Search(term) if term.trim().is_empty() => Ok(0),
+            Shelf::Search(term) => calibre::count_books_matching(db, term.trim()),
         }
     }
 
@@ -306,8 +343,16 @@ impl Shelf {
             Shelf::Everything => calibre::books_page(db, limit, offset),
             Shelf::Author(id) => calibre::books_by_author_page(db, *id, limit, offset),
             Shelf::Tag(id) => calibre::books_by_tag_page(db, *id, limit, offset),
+            // Nothing typed is nothing found: a bare `%%` would be the whole library.
+            Shelf::Search(term) if term.trim().is_empty() => Ok(Vec::new()),
+            Shelf::Search(term) => calibre::books_search_page(db, term.trim(), limit, offset),
         }
     }
+}
+
+/// `NON_ALPHANUMERIC` keeps `&`, `=` and `+` out of a URL
+fn encoded(term: &str) -> String {
+    utf8_percent_encode(term, NON_ALPHANUMERIC).to_string()
 }
 
 /// One page of books, whichever shelf they come off.
@@ -344,20 +389,35 @@ fn books_feed(
 
     let base = origin(req, data.config);
     let path = shelf.path();
-    let mut page = feed(
+    let mut page = library_feed(
         format!("{} | {}", lib, name),
         page_url(&base, lib, &path, window.current),
         &base,
+        lib,
     )
     .modified(calibre::updated(&db))
-    .page(total, PER_PAGE, window.current)
-    .publications(books.iter().map(|book| publication(book, lib, &base)).collect());
+    .page(total, PER_PAGE, window.current);
+    page = holding(page, &books, lib, &base);
 
     for link in page_links(&base, lib, &path, &window) {
         page = page.link(link);
     }
 
     json(&page, FEED)
+}
+
+/// A feed has to hold one of `publications`, `navigation` or `groups`, so a
+/// search that matched nothing cannot simply leave `publications` out.
+fn holding(feed: Feed, books: &[Book], lib: &str, base: &str) -> Feed {
+    match books.is_empty() {
+        true => feed.navigation(vec![Link::new(format!("{}/v2/{}", base, lib))
+            .rel("up")
+            .mime(FEED)
+            .title(format!("Back to {}", lib))]),
+        false => {
+            feed.publications(books.iter().map(|book| publication(book, lib, base)).collect())
+        }
+    }
 }
 
 /// Every book in the library, a page at a time.
@@ -399,6 +459,20 @@ async fn books_by_tag(
     books_feed(&data, &req, &lib, Shelf::Tag(tag), query.page.unwrap_or(1))
 }
 
+/// Everything whose title or author matches `?query=`, paginated.
+#[actix_web::get("/v2/{lib}/search")]
+async fn search(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    asked: web::Query<SearchQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let term = asked.query.clone().unwrap_or_default();
+    books_feed(&data, &req, &lib, Shelf::Search(term), asked.page.unwrap_or(1))
+}
+
 /// The feed a kind of shelf lives in: `authors` for `Shelf::Author`
 fn feed_of(shelf: fn(i32) -> Shelf) -> &'static str {
     shelf(0).feed()
@@ -425,10 +499,11 @@ fn shelves(
         })
         .collect();
 
-    feed(
+    library_feed(
         format!("{} | {}", lib, title),
         page_url(base, lib, feed_of(shelf), 1),
         base,
+        lib,
     )
     .modified(modified)
     .navigation(navigation)
@@ -505,20 +580,15 @@ async fn recently_added(
     };
 
     let base = origin(&req, data.config);
-    let new = feed(
+    let new = library_feed(
         format!("{} | Recently Added", lib),
         format!("{}/v2/{}/new", base, lib),
         &base,
+        &lib,
     )
-    .modified(calibre::updated(&db))
-    .publications(
-        books
-            .iter()
-            .map(|book| publication(book, &lib, &base))
-            .collect(),
-    );
+    .modified(calibre::updated(&db));
 
-    json(&new, FEED)
+    json(&holding(new, &books, &lib, &base), FEED)
 }
 
 /// A single book, outside of any feed. This is what the `self` link of every

@@ -586,9 +586,9 @@ async fn missing_ids_return_404_and_leave_the_library_usable() {
     assert!(resp.status().is_success(), "library unusable after a missing-id request");
 }
 
-// Tags and authors that match nothing are an empty feed, not an error.
+// An id that names no author and no tag is a 404, the same as under `/v2`.
 #[test]
-async fn unmatched_queries_render_an_empty_feed() {
+async fn a_shelf_that_is_not_there_is_404() {
     let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
@@ -597,12 +597,7 @@ async fn unmatched_queries_render_an_empty_feed() {
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
             .to_request();
         let resp = test::call_service(&app, req).await;
-        assert!(resp.status().is_success(), "{} should succeed", uri);
-
-        let body = test::read_body(resp).await;
-        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
-        assert!(is_opds(&content));
-        assert_eq!(count_items(&content), 0, "{} should have no entries", uri);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{} should be 404", uri);
     }
 }
 

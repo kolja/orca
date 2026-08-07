@@ -24,8 +24,7 @@ use templates::Template;
 use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, recently_added, tags};
 use appstate::AppState;
 
-// Tera filter to convert format to mime type. The table itself lives next to the
-// formats it names, so the OPDS 2.0 links can use it too.
+// Tera filter to convert format to mime type -- OPDS v2 links can use it too.
 fn format_to_mime_filter(format: &str, _: Kwargs, _: &State) -> &'static str {
     calibre::mime(format)
 }
@@ -149,6 +148,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(routes_v2::tags);
     cfg.service(routes_v2::books_by_author);
     cfg.service(routes_v2::books_by_tag);
+    cfg.service(routes_v2::search);
 
     cfg.service(index);
     cfg.service(opds);

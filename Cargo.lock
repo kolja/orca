@@ -1697,6 +1697,7 @@ dependencies = [
  "lazy_static",
  "once_cell",
  "openssl",
+ "percent-encoding",
  "quick-xml",
  "rand 0.10.2",
  "regex",

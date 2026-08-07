@@ -26,6 +26,9 @@ pub const IMAGE: &str = "http://opds-spec.org/image";
 /// The rel of a feed of what arrived last.
 pub const SORT_NEW: &str = "http://opds-spec.org/sort/new";
 
+/// The rel of the templated link a client fills in to search the catalog.
+pub const SEARCH: &str = "search";
+
 /// A feed is `metadata` and `links` plus at least one of `navigation`,
 /// `publications` or `groups`: a catalog of places to go, or of books to read.
 #[derive(Debug, Serialize)]
@@ -107,8 +110,16 @@ pub struct Link {
     pub rel: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Says the `href` is a URI template and not an address to follow
+    #[serde(skip_serializing_if = "is_false")]
+    pub templated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub properties: Option<Properties>,
+}
+
+/// `templated` is absent rather than `false` on the links that are not templates.
+fn is_false(flag: &bool) -> bool {
+    !flag
 }
 
 impl Link {
@@ -118,6 +129,7 @@ impl Link {
             mime: None,
             rel: None,
             title: None,
+            templated: false,
             properties: None,
         }
     }
@@ -136,6 +148,11 @@ impl Link {
     /// puts on the download button of an acquisition link.
     pub fn title(mut self, title: impl Into<String>) -> Self {
         self.title = Some(title.into());
+        self
+    }
+
+    pub fn templated(mut self) -> Self {
+        self.templated = true;
         self
     }
 

@@ -336,7 +336,8 @@ async fn a_library_that_fits_on_one_page_links_to_no_other() {
     assert_eq!(books["metadata"]["numberOfItems"], 7);
     assert_eq!(books["metadata"]["itemsPerPage"], 50);
     assert_eq!(books["metadata"]["currentPage"], 1);
-    assert_eq!(rels(&books["links"]), ["self", "start"]);
+    // No `next` and no `last`
+    assert_eq!(rels(&books["links"]), ["self", "start", "search"]);
 }
 
 // A client following a `next` link it kept from before the library shrank.
@@ -350,6 +351,133 @@ async fn a_page_past_the_end_still_holds_books() {
     assert_eq!(books["publications"].as_array().unwrap().len(), 7);
     // The feed says where it really is, not where it was asked to be.
     assert_eq!(books["links"][0]["href"], "http://localhost:8080/v2/library/books");
+}
+
+// ------- search -------
+
+// A client finds the search endpoint by expanding this
+#[test]
+async fn every_feed_of_a_library_says_how_to_search_it() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    for path in ["/v2/library", "/v2/library/books", "/v2/library/new", "/v2/library/authors",
+                 "/v2/library/tags", "/v2/library/authors/4", "/v2/library/tags/9"] {
+        let feed = feed(&app, path).await;
+        let search = feed["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|link| link["rel"] == "search")
+            .unwrap_or_else(|| panic!("{} offers no search", path));
+
+        assert_eq!(
+            search["href"],
+            "http://localhost:8080/v2/library/search?query={query}"
+        );
+        assert_eq!(search["templated"], true);
+        assert_eq!(search["type"], "application/opds+json");
+    }
+}
+
+#[test]
+async fn the_catalog_root_offers_no_search() {
+    let app = setup(&TEST_HTTPS_CONFIG).await;
+    let catalog = feed(&app, "/v2").await;
+
+    assert!(!rels(&catalog["links"]).contains(&"search".to_string()));
+}
+
+#[test]
+async fn a_search_finds_books_by_title_and_by_author() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    let by_title = feed(&app, "/v2/library/search?query=wonderland").await;
+    validates(&by_title, FEED);
+    assert_eq!(by_title["metadata"]["title"], "library | Search: wonderland");
+    assert_eq!(by_title["metadata"]["numberOfItems"], 1);
+    assert_eq!(
+        by_title["publications"][0]["metadata"]["title"],
+        "Alice's Adventures in Wonderland"
+    );
+
+    let by_author = feed(&app, "/v2/library/search?query=lovecraft").await;
+    assert_eq!(
+        by_author["publications"][0]["metadata"]["title"],
+        "At the Mountains of Madness"
+    );
+}
+
+// A feed has to hold publications, navigation or groups -- never nothing at all.
+#[test]
+async fn a_search_that_finds_nothing_is_an_empty_feed() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    // A term nothing matches, and a wildcard that must not match everything.
+    for term in ["nosuchbook", "%"] {
+        let empty = feed(&app, &format!("/v2/library/search?query={}", term)).await;
+        validates(&empty, FEED);
+
+        assert_eq!(empty["metadata"]["numberOfItems"], 0, "{}", term);
+        assert!(empty.get("publications").is_none(), "{}", term);
+        assert_eq!(titles(&empty["navigation"]), ["Back to library"], "{}", term);
+    }
+}
+
+// Nothing typed is nothing found: `LIKE '%%'` would be the whole library.
+#[test]
+async fn an_empty_search_finds_nothing() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    for path in ["/v2/library/search", "/v2/library/search?query="] {
+        let empty = feed(&app, path).await;
+        validates(&empty, FEED);
+        assert_eq!(empty["metadata"]["title"], "library | Search");
+        assert_eq!(empty["metadata"]["numberOfItems"], 0, "{}", path);
+    }
+}
+
+// The term stays in the address, so every page searches for the same thing.
+#[test]
+async fn a_search_pages_without_losing_its_term() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let found = feed(&app, "/v2/library/search?query=the%20mountains&page=2").await;
+
+    // One hit fits on one page, so page two is page one -- under its own address.
+    assert_eq!(found["metadata"]["currentPage"], 1);
+    assert_eq!(
+        found["links"][0]["href"],
+        "http://localhost:8080/v2/library/search?query=the%20mountains"
+    );
+}
+
+// A term with an `&` in it must not turn into a second query parameter.
+#[test]
+async fn a_search_term_is_escaped_into_its_own_address() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let found = feed(&app, "/v2/library/search?query=Kepler%20%26%20Galilei").await;
+
+    assert_eq!(
+        found["links"][0]["href"],
+        "http://localhost:8080/v2/library/search?query=Kepler%20%26%20Galilei"
+    );
+    assert_eq!(found["metadata"]["numberOfItems"], 0);
+}
+
+// https://xkcd.com/327/
+#[test]
+async fn a_search_cannot_drop_the_students_table() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let bobby = feed(&app, "/v2/library/search?query=Robert%27%29%3B%20DROP%20TABLE%20books%3B--").await;
+
+    assert_eq!(
+        bobby["metadata"]["title"],
+        "library | Search: Robert'); DROP TABLE books;--"
+    );
+    assert_eq!(bobby["metadata"]["numberOfItems"], 0);
+
+    // The library is still there:
+    let books = feed(&app, "/v2/library/books").await;
+    assert_eq!(books["metadata"]["numberOfItems"], 7);
 }
 
 // does the schema catch a feed without a `self` link

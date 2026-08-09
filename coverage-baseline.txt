@@ -1,7 +1,7 @@
 src/authdoc.rs 7 7
 src/authorized.rs 34 35
 src/calibre.rs 198 201
-src/config.rs 44 49
+src/config.rs 48 52
 src/hash.rs 14 14
 src/lib.rs 80 82
 src/main.rs 0 13

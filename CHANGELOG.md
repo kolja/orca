@@ -19,5 +19,6 @@ New:
 - OPDS 2.0 feeds under `/v2`, beside the Atom feeds, which are unchanged
 - search, at `/v2/{lib}/search?query=`, offered by every feed of a library
 - an OPDS Authentication Document at `/auth`, and as the body of every 401
+- a config file that exists but does not parse is an error (not a reason to keep looking for a valid one).
 
 Earlier releases: see `git log`.

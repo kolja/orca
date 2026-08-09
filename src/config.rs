@@ -111,6 +111,10 @@ fn find_config(paths: Vec<Option<String>>) -> Result<Config, Error> {
                 println!("Config loaded from: {}", path);
                 return Ok(config);
             }
+            // A file that is there and does not parse is the config the operator meant to use.
+            Err(err) if valid_file(path) => {
+                return Err(anyhow!(PathError { path: path.clone(), error: err }));
+            }
             Err(err) => {
                 errors.push(PathError { path: path.clone(), error: err });
             }
@@ -257,73 +261,9 @@ mod tests {
     }
 
     #[test]
-    fn test_find_config_multiple_paths() {
-        let mut tmp_file1 = NamedTempFile::new().unwrap();
-        let invalid_toml = r#"
-        [server
-        foo = "127.0.0.1"
-        port = 8080
-        "#;
-        write!(tmp_file1, "{}", invalid_toml).unwrap();
-
-        let mut tmp_file2 = NamedTempFile::new().unwrap();
-        let valid_toml = r#"
-        [server]
-        ip = "127.0.0.1"
-        port = 8080
-        protocol = "Http"
-
-        [authentication.login]
-        alice = "...passwordhash..."
-
-        [calibre]
-        libraries = {}
-        "#;
-        write!(tmp_file2, "{}", valid_toml).unwrap();
-
-        let tmp_file1_path = tmp_file1.path().to_str().unwrap().to_string();
-        let tmp_file2_path = tmp_file2.path().to_str().unwrap().to_string();
-        let config = find_config(vec![Some(tmp_file1_path), Some(tmp_file2_path)]);
-        assert!(config.is_ok());
-        assert_eq!(config.unwrap().server.ip, "127.0.0.1");
-    }
-
-    #[test]
     fn test_valid_file_nonexistent() {
         let path = "/nonexistent_path/to_config.toml";
         assert!(!valid_file(path));
-    }
-
-    #[test]
-    fn test_find_config_some_valid_paths() {
-        let mut tmp_file1 = NamedTempFile::new().unwrap();
-        let invalid_toml = r#"
-        [server
-        foo = "127.0.0.1"
-        bar = 8080
-        "#;
-        write!(tmp_file1, "{}", invalid_toml).unwrap();
-
-        let mut tmp_file2 = NamedTempFile::new().unwrap();
-        let valid_toml = r#"
-        [server]
-        ip = "127.0.0.1"
-        port = 8080
-        protocol = "Http"
-
-        [authentication.login]
-        bob = "...passwordhash..."
-
-        [calibre]
-        libraries = {}
-        "#;
-        write!(tmp_file2, "{}", valid_toml).unwrap();
-
-        let tmp_file1_path = tmp_file1.path().to_str().unwrap().to_string();
-        let tmp_file2_path = tmp_file2.path().to_str().unwrap().to_string();
-        let config = find_config(vec![Some(tmp_file1_path), Some(tmp_file2_path)]);
-        assert!(config.is_ok());
-        assert_eq!(config.unwrap().server.ip, "127.0.0.1");
     }
 
     #[test]
@@ -352,6 +292,59 @@ mod tests {
         } else {
             panic!("Expected Https protocol");
         }
+    }
+
+    fn config_file(contents: &str) -> NamedTempFile {
+        let mut file = NamedTempFile::new().unwrap();
+        write!(file, "{}", contents).unwrap();
+        file
+    }
+
+    fn path_of(file: &NamedTempFile) -> Option<String> {
+        Some(file.path().to_str().unwrap().to_string())
+    }
+
+    const VALID: &str = r#"
+        [server]
+        ip = "127.0.0.1"
+        port = 8080
+        protocol = "Http"
+
+        [authentication.login]
+        alice = "...passwordhash..."
+
+        [calibre.libraries.library]
+        path = "/mnt/library"
+        "#;
+
+    #[test]
+    fn a_config_that_does_not_parse_stops_the_search() {
+        // 0.1 wrote a library as a path; 0.2 wants a table.
+        let broken = config_file(&VALID.replace(
+            "[calibre.libraries.library]\n        path =",
+            "[calibre.libraries]\n        library =",
+        ));
+        let fallback = config_file(VALID);
+
+        let err = match find_config(vec![path_of(&broken), path_of(&fallback)]) {
+            Ok(_) => panic!("a malformed config must not be skipped"),
+            Err(err) => err.to_string(),
+        };
+
+        assert!(err.contains("expected struct Library"), "{}", err);
+        assert!(err.contains(broken.path().to_str().unwrap()), "{}", err);
+    }
+
+    #[test]
+    fn a_config_that_is_not_there_is_skipped() {
+        let fallback = config_file(VALID);
+
+        let config = find_config(vec![
+            Some("/nonexistent/path/to/config.toml".to_string()),
+            path_of(&fallback),
+        ]);
+
+        assert_eq!(config.unwrap().server.port, 8080);
     }
 
     #[test]

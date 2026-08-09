@@ -67,6 +67,9 @@ pub struct Library {
     pub author: Option<String>,
 }
 
+/// the name of the catalog / title of its root feed
+pub const CATALOG: &str = "ORCA";
+
 /// How the catalog presents itself, as opposed to where its books live.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Catalog {

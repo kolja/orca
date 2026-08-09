@@ -1,6 +1,7 @@
 
 pub mod templates;
 pub mod appstate;
+pub mod authdoc;
 pub mod authorized;
 pub mod calibre;
 pub mod config;
@@ -21,7 +22,7 @@ use tera::{Kwargs, State, Tera};
 
 use config::{Config, Protocol};
 use templates::Template;
-use routes::{health, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, opds, recently_added, tags};
+use routes::{health, authentication, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, logo, opds, recently_added, tags};
 use appstate::AppState;
 
 // Tera filter to convert format to mime type -- OPDS v2 links can use it too.
@@ -50,7 +51,7 @@ fn open_library(library: &str, path: &str) -> Result<Connection> {
 }
 
 /// Path segments reserved to orca. Can't serve a library under these.
-const RESERVED: [&str; 2] = ["v2", "health"];
+const RESERVED: [&str; 3] = ["v2", "health", "auth"];
 
 pub fn create_app(config: &'static Config) -> Result<AppState> {
 
@@ -138,6 +139,10 @@ pub async fn run_server(state: AppState) -> std::io::Result<()> {
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(health);
+
+    // Before `/{lib}`, which would otherwise answer for `/auth` as well.
+    cfg.service(authentication);
+    cfg.service(logo);
 
     cfg.service(routes_v2::catalog);
     cfg.service(routes_v2::library_root);
@@ -249,6 +254,17 @@ mod tests {
             "a broken library must not be skipped",
         );
         assert!(err.contains("library 'bad'"), "{}", err);
+    }
+
+    #[test]
+    fn a_library_named_after_a_route_refuses_to_start() {
+        for name in RESERVED {
+            let err = refusal(
+                create_app(config_for(&[(name, "tests/calibre")])),
+                "a library named after one of Orca's own routes must not start a server",
+            );
+            assert!(err.contains(&format!("library '{}': the name is reserved", name)), "{}", err);
+        }
     }
 
     #[test]

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Vendor the OPDS 2.0 schemas into tests/schema, so `cargo test` can validate
-# feeds without reaching the network. The two OPDS schemas pull in a dozen
-# Readium ones, so every "$ref" is followed and fetched too.
+# Vendor the OPDS schemas into tests/schema, so `cargo test` can validate feeds
+# without reaching the network. The three OPDS schemas pull in a dozen Readium
+# ones, so every "$ref" is followed and fetched too.
 #
 # Files are stored under the path of their URL -- tests/schema/specs.opds.io/...
 # -- which is how tests/opds2_test.rs turns them back into the "$id" each schema
@@ -39,6 +39,7 @@ fetch() {
 roots=(
     https://specs.opds.io/schema/feed.schema.json
     https://specs.opds.io/schema/publication.schema.json
+    https://drafts.opds.io/schema/authentication.schema.json
 )
 
 for root in "${roots[@]}"; do

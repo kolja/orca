@@ -3,6 +3,7 @@ use actix_web::{web, Error, HttpRequest, HttpResponse, Responder};
 use actix_web::http::header::{ContentDisposition, DispositionType};
 use actix_files as fs;
 use tera::Tera;
+use crate::authdoc;
 use crate::authorized::Authorized;
 use crate::appstate::AppState;
 use crate::calibre;
@@ -116,6 +117,23 @@ fn attachment(path: &str) -> Result<fs::NamedFile, Error> {
 #[actix_web::get("/health")]
 async fn health(_auth: Authorized) -> impl Responder {
     HttpResponse::Ok().body("OK")
+}
+
+/// for a client that would rather show a login form of its own
+/// than send credentials blind. The same document every 401 carries.
+#[actix_web::get("/auth")]
+async fn authentication(data: web::Data<AppState>, req: HttpRequest) -> impl Responder {
+    HttpResponse::Ok()
+        .content_type(authdoc::AUTHENTICATION)
+        .body(authdoc::body(&origin(&req, data.config)))
+}
+
+/// The logo for the login form
+#[actix_web::get("/auth/logo.svg")]
+async fn logo() -> impl Responder {
+    HttpResponse::Ok()
+        .content_type(authdoc::LOGO)
+        .body(&include_bytes!("../orca-logo.svg")[..])
 }
 
 #[actix_web::get("/{lib}/cover/{id}")]

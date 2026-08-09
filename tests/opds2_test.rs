@@ -1,7 +1,7 @@
-//! OPDS 2.0 feeds, checked against the spec
+//! OPDS 2.0 feeds and the authentication document, checked against the spec
 //!
 //! schemas live in `tests/schema`, fetched by `scripts/fetch-schemas.sh`:
-//! the two OPDS ones pull in a lot of Readium schemas
+//! the three OPDS ones pull in a lot of Readium schemas
 
 use actix_http::Request;
 use actix_web::dev::{Service, ServiceResponse};
@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 const FEED: &str = "https://specs.opds.io/schema/feed.schema.json";
 const PUBLICATION: &str = "https://specs.opds.io/schema/publication.schema.json";
+const AUTHENTICATION: &str = "https://drafts.opds.io/schema/authentication.schema.json";
 
 static TEST_HTTP_CONFIG: Lazy<Config> =
     Lazy::new(|| read_config("tests/orca.http.test.toml").expect("Failed to read test config"));
@@ -224,6 +225,64 @@ async fn opds2_is_no_more_public_than_opds1() {
     ] {
         assert_eq!(call(&app, path).await.status(), StatusCode::UNAUTHORIZED, "{}", path);
     }
+}
+
+// ------- Who is asking -------
+
+// A refusal says who refused and how to get past it, in a body a client can read.
+#[test]
+async fn a_401_carries_the_authentication_document() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    // The extractor refuses, not the feed, so Atom and JSON are refused alike.
+    for path in ["/v2/library", "/library/books", "/library/cover/4"] {
+        let response = call(&app, path).await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{}", path);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/opds-authentication+json",
+            "{}",
+            path
+        );
+        // A browser and curl read nothing but the header.
+        assert_eq!(
+            response.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+            r#"Basic realm="Login Required""#,
+            "{}",
+            path
+        );
+
+        let document = json(response).await;
+        validates(&document, AUTHENTICATION);
+        assert_eq!(document["title"], "ORCA");
+        assert_eq!(
+            document["authentication"][0]["type"],
+            "http://opds-spec.org/auth/basic"
+        );
+    }
+}
+
+// also applies to the logo
+#[test]
+async fn the_authentication_document_is_not_behind_the_login() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    let response = call(&app, "/auth").await;
+    assert!(response.status().is_success());
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/opds-authentication+json"
+    );
+
+    let document = json(response).await;
+    validates(&document, AUTHENTICATION);
+    assert_eq!(document["id"], "http://localhost:8080/auth");
+    assert_eq!(rels(&document["links"]), ["self", "logo"]);
+
+    let logo = call(&app, "/auth/logo.svg").await;
+    assert!(logo.status().is_success());
+    assert_eq!(logo.headers().get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
+    assert!(String::from_utf8_lossy(&test::read_body(logo).await).contains("<svg"));
 }
 
 // ------- What a publication says -------
@@ -480,9 +539,9 @@ async fn a_search_cannot_drop_the_students_table() {
     assert_eq!(books["metadata"]["numberOfItems"], 7);
 }
 
-// does the schema catch a feed without a `self` link
 #[test]
 async fn the_schema_check_has_teeth() {
+    // does the schema catch a feed without a `self` link
     let feed = serde_json::json!({
         "metadata": { "title": "library" },
         "links": [{ "href": "http://localhost:8080/v2/library" }],
@@ -490,6 +549,11 @@ async fn the_schema_check_has_teeth() {
     });
 
     assert!(validate(&feed, FEED).is_err());
+
+    // and an authentication document that names no way of authenticating
+    let document = serde_json::json!({ "id": "http://localhost:8080/auth", "title": "ORCA" });
+
+    assert!(validate(&document, AUTHENTICATION).is_err());
 }
 
 // ------- OPDS 1.2 is untouched -------

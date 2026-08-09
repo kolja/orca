@@ -2,18 +2,20 @@
 
 **do not edit by hand.**
 
-Fetched by `scripts/fetch-schemas.sh` on 2026-08-04
+Fetched by `scripts/fetch-schemas.sh` on 2026-08-08
 `tests/opds2_test.rs` validates every OPDS 2.0 feed against these offline.
 Roots, whose `$ref`s pull in every other file here:
 
 - <https://specs.opds.io/schema/feed.schema.json>
 - <https://specs.opds.io/schema/publication.schema.json>
+- <https://drafts.opds.io/schema/authentication.schema.json>
 
 prefixing `https://` gives back the `$id` by which the other schemas refer to it.
 
-Fetched 26 files:
+Fetched 27 files:
 
 ```text
+drafts.opds.io/schema/authentication.schema.json
 readium.org/webpub-manifest/schema/a11y.schema.json
 readium.org/webpub-manifest/schema/altIdentifier.schema.json
 readium.org/webpub-manifest/schema/article.schema.json

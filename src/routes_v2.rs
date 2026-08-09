@@ -16,6 +16,7 @@ use std::sync::MutexGuard;
 use crate::appstate::AppState;
 use crate::authorized::Authorized;
 use crate::calibre::{self, Book};
+use crate::config::CATALOG;
 use crate::opds2::{
     BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
     BOOK, FEED, IMAGE, PUBLICATION, SEARCH, SORT_NEW,
@@ -224,7 +225,7 @@ async fn catalog(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest)
         .collect();
 
     // Left out rather than made up: `modified` has to be a date-time
-    let mut root = feed("ORCA", format!("{}/v2", base), &base).navigation(navigation);
+    let mut root = feed(CATALOG, format!("{}/v2", base), &base).navigation(navigation);
     if let Some(updated) = updated {
         root = root.modified(updated);
     }

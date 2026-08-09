@@ -7,20 +7,22 @@ use actix_web::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::hash;
+use crate::authdoc;
 use crate::config::Config;
 use crate::appstate::AppState;
+use crate::routes::origin;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
 use std::future::{ready, Ready};
 
 #[derive(Debug)]
 struct UnauthorizedError {
-    message: &'static str,
+    document: String,
 }
 
 impl Display for UnauthorizedError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "{}", self.document)
     }
 }
 
@@ -28,6 +30,7 @@ impl ResponseError for UnauthorizedError {
     fn error_response(&self) -> HttpResponse {
         HttpResponse::build(self.status_code())
             .append_header(("WWW-Authenticate", r#"Basic realm="Login Required""#))
+            .content_type(authdoc::AUTHENTICATION)
             .body(self.to_string())
     }
 
@@ -82,7 +85,7 @@ impl FromRequest for Authorized {
                     }))
                 } else {
                     let error = UnauthorizedError {
-                        message: "Unauthorized",
+                        document: authdoc::body(&origin(req, config)),
                     };
                     ready(Err(error.into()))
                 }

@@ -10,7 +10,29 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A simple OPDS Server for Calibre written in Rust.
-It supports http and https, basic authentication and multiple libraries.
+
+It supports:
+
+- OPDS v1 and v2
+- http and https
+- basic authentication
+- multiple Calibre libraries
+
+## Try it
+
+Before you serve your own library, you can test orca by firing up a demo that contains
+seven public-domain books, in three languages, as EPUB, MOBI and AZW3:
+
+```bash
+docker run --rm -p 23117:23117 koljaw/orca-demo
+```
+Add `--auth` to serve the same library behind a login (`alice` / `secretpassword`):
+
+```bash
+docker run --rm -p 23117:23117 koljaw/orca-demo --auth
+```
+
+Then point an OPDS reader at `http://127.0.0.1:23117` or `http://127.0.0.1:23117/v2` for an OPDS v2 feed.
 
 ## Installation
 
@@ -76,10 +98,10 @@ According to RFC 4287 every catalog needs an Author. The field is set to "orca" 
 
 ## Running behind a reverse proxy
 
-Every feed advertises its own address in `<link rel="self">`. 
+Every feed advertises its own address in `<link rel="self">`.
 Some OPDS clients will resolve links against that self link instead of against the URL they fetched — which is not necessarily the address Orca binds to.
 
-Orca derives it from the request, honouring `X-Forwarded-Proto` and `X-Forwarded-Host`, so a proxy that sets those headers needs no extra configuration. 
+Orca derives it from the request, honouring `X-Forwarded-Proto` and `X-Forwarded-Host`, so a proxy that sets those headers needs no extra configuration.
 
 If your proxy cannot set them, set `public_url` in the `[server]` section to the
 externally visible base URL. It will take precedence over the headers.
@@ -88,7 +110,8 @@ externally visible base URL. It will take precedence over the headers.
 
 There are a couple of tasks you can run with `cargo make`:
 
-- `cargo make docker-build <image/name>` - Build Docker image and push it to the registry
+- `cargo make docker-build <image/name>` - Build Docker image and push it to the registry, followed by `<image/name>-demo`
+- `cargo make docker-build-demo <image/name>` - Rebuild only the demo image
 - `cargo make git-tag` - Create and push a new git tag. The Version number is read from `Cargo.toml`
 - `cargo make list-sha` - List all the sha256 hashes for the Assets in the Release (for use with the the homebrew formula)
 

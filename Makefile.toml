@@ -5,9 +5,17 @@ script = [
 ]
 
 [tasks.docker-build]
-description = "Build and push Docker image"
+description = "Build and push the Docker image, and the demo image on top of it"
 script = [
-  "./docker/docker-build.sh ${@}"
+  "./docker/docker-build.sh ${@} && ./docker/demo-build.sh ${@}"
+]
+
+# Only needed when the demo changes on its own:
+# docker-build will also buid and push the demo
+[tasks.docker-build-demo]
+description = "Build and push just the demo image"
+script = [
+  "./docker/demo-build.sh ${@}"
 ]
 
 [tasks.docker-run]

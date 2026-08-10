@@ -1,0 +1,18 @@
+# The demo behind a login: alice / secretpassword.
+
+[server]
+ip = "0.0.0.0"
+port = 23117
+protocol = "Http"
+
+[authentication.login]
+# orca --hash alice:secretpassword
+alice = "$argon2id$v=19$m=19456,t=2,p=1$G57mIrlohNqdISyznvXyhw$qNaLVhDp+FJfK38DfJKQOORVG9Mpp00I6EqWz6lsrnQ"
+
+[authentication]
+# If the book detail view doen't show you the book cover, consider:
+# `public = ["/*/cover/*"]`.
+public = ["/health"]
+
+[calibre.libraries.demo]
+path = "/demo/library"

@@ -1,0 +1,33 @@
+# Orca, plus the test library and a config, so that trying it out is one line.
+# the demo runs the published binary. Anyone who already has `orca` pulls only the books.
+
+ARG VERSION=latest
+ARG BASE=koljaw/orca
+
+FROM ${BASE}:${VERSION} AS release
+
+# Not `scratch` like the release image: the demo needs a shell to turn `--auth`
+# into a choice of config and to display a message.
+FROM alpine:3.22
+
+ARG VERSION
+LABEL org.opencontainers.image.title="orca-demo" \
+      org.opencontainers.image.description="Orca with a small public-domain library, ready to run" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.source="https://github.com/kolja/orca" \
+      org.opencontainers.image.licenses="MIT"
+
+ENV ORCA_VERSION=${VERSION}
+
+COPY --from=release /app/orca /app/orca
+COPY tests/calibre /demo/library
+COPY docker/demo/open.toml docker/demo/auth.toml /demo/
+COPY docker/demo/entrypoint.sh /demo/entrypoint.sh
+
+RUN chmod 755 /demo/entrypoint.sh
+
+EXPOSE 23117
+
+USER 65532:65532
+
+ENTRYPOINT ["/demo/entrypoint.sh"]

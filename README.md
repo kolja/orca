@@ -22,17 +22,11 @@ It supports:
 
 Before you serve your own library, you can test orca by firing up a demo that contains
 seven public-domain books, in three languages, as EPUB, MOBI and AZW3:
-
 ```bash
-docker run --rm -p 23117:23117 koljaw/orca-demo
+docker run --rm --pull=always -p 23117:23117 koljaw/orca-demo
 ```
-Add `--auth` to serve the same library behind a login (`alice` / `secretpassword`):
-
-```bash
-docker run --rm -p 23117:23117 koljaw/orca-demo --auth
-```
-
-Then point an OPDS reader at `http://127.0.0.1:23117` or `http://127.0.0.1:23117/v2` for an OPDS v2 feed.
+Add `--auth` at the end to serve the same library behind a login (`alice` / `secretpassword`)
+then point an OPDS reader at `http://127.0.0.1:23117` or `http://127.0.0.1:23117/v2` for an OPDS v2 feed.
 
 ## Installation
 

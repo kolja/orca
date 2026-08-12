@@ -172,7 +172,17 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
                 "" => None,
                 synopsis => Some(synopsis.to_string()),
             },
-            publisher: book.publisher.clone(),
+            publisher: book
+                .publisher
+                .iter()
+                .map(|publisher| Contributor {
+                    name: publisher.name.clone(),
+                    links: vec![
+                        Link::new(format!("{}/v2/{}/publishers/{}", base, lib, publisher.id))
+                            .mime(FEED),
+                    ],
+                })
+                .collect(),
             subject: book
                 .tags
                 .iter()
@@ -184,7 +194,11 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
             belongs_to: book.series.as_ref().map(|series| BelongsTo {
                 series: Series {
                     name: series.name.clone(),
+                    identifier: Some(format!("urn:orca:{}:series:{}", lib, series.id)),
                     position: Some(series.index),
+                    links: vec![
+                        Link::new(format!("{}/v2/{}/series/{}", base, lib, series.id)).mime(FEED),
+                    ],
                 },
             }),
         },
@@ -275,6 +289,12 @@ async fn library_root(
     if counts.tags > 0 {
         navigation.push(browse(feed_of(Shelf::Tag), "Tags", counts.tags));
     }
+    if counts.series > 0 {
+        navigation.push(browse(feed_of(Shelf::Series), "Series", counts.series));
+    }
+    if counts.publishers > 0 {
+        navigation.push(browse(feed_of(Shelf::Publisher), "Publishers", counts.publishers));
+    }
 
     let root = library_feed(lib.clone(), format!("{}/v2/{}", base, lib), &base, &lib)
         .modified(calibre::updated(&db))
@@ -284,11 +304,13 @@ async fn library_root(
 }
 
 /// a `shelf` carries no books -- it says only how to ask Calibre and what to call the result.
-/// paging works identical on all of them.
+/// paging works the same on all of them.
 enum Shelf {
     Everything,
     Author(i32),
     Tag(i32),
+    Series(i32),
+    Publisher(i32),
     /// a term nothing matches is an empty shelf, not a 404.
     Search(String),
 }
@@ -301,6 +323,8 @@ impl Shelf {
             Shelf::Everything => "books",
             Shelf::Author(_) => "authors",
             Shelf::Tag(_) => "tags",
+            Shelf::Series(_) => "series",
+            Shelf::Publisher(_) => "publishers",
             Shelf::Search(_) => "search",
         }
     }
@@ -309,7 +333,9 @@ impl Shelf {
     fn path(&self) -> String {
         match self {
             Shelf::Everything => self.feed().to_string(),
-            Shelf::Author(id) | Shelf::Tag(id) => format!("{}/{}", self.feed(), id),
+            Shelf::Author(id) | Shelf::Tag(id) | Shelf::Series(id) | Shelf::Publisher(id) => {
+                format!("{}/{}", self.feed(), id)
+            }
             // The term is part of the address, so every page of a search finds
             // its way back to the same books.
             Shelf::Search(term) => format!("{}?query={}", self.feed(), encoded(term)),
@@ -322,6 +348,8 @@ impl Shelf {
             Shelf::Everything => Ok("All Books".to_string()),
             Shelf::Author(id) => calibre::author_name(db, *id),
             Shelf::Tag(id) => calibre::tag_name(db, *id),
+            Shelf::Series(id) => calibre::series_name(db, *id),
+            Shelf::Publisher(id) => calibre::publisher_name(db, *id),
             Shelf::Search(term) => Ok(match term.trim() {
                 "" => "Search".to_string(),
                 term => format!("Search: {}", term),
@@ -334,16 +362,22 @@ impl Shelf {
             Shelf::Everything => calibre::count_books(db),
             Shelf::Author(id) => calibre::count_books_by_author(db, *id),
             Shelf::Tag(id) => calibre::count_books_by_tag(db, *id),
+            Shelf::Series(id) => calibre::count_books_in_series(db, *id),
+            Shelf::Publisher(id) => calibre::count_books_by_publisher(db, *id),
             Shelf::Search(term) if term.trim().is_empty() => Ok(0),
             Shelf::Search(term) => calibre::count_books_matching(db, term.trim()),
         }
     }
 
+    /// Every shelf is in the order the whole library is in;
+    /// except the series, which is in the order it is meant to be read.
     fn books(&self, db: &Connection, limit: usize, offset: usize) -> rusqlite::Result<Vec<Book>> {
         match self {
             Shelf::Everything => calibre::books_page(db, limit, offset),
             Shelf::Author(id) => calibre::books_by_author_page(db, *id, limit, offset),
             Shelf::Tag(id) => calibre::books_by_tag_page(db, *id, limit, offset),
+            Shelf::Series(id) => calibre::books_in_series_page(db, *id, limit, offset),
+            Shelf::Publisher(id) => calibre::books_by_publisher_page(db, *id, limit, offset),
             // Nothing typed is nothing found: a bare `%%` would be the whole library.
             Shelf::Search(term) if term.trim().is_empty() => Ok(Vec::new()),
             Shelf::Search(term) => calibre::books_search_page(db, term.trim(), limit, offset),
@@ -460,6 +494,31 @@ async fn books_by_tag(
     books_feed(&data, &req, &lib, Shelf::Tag(tag), query.page.unwrap_or(1))
 }
 
+/// One series, in reading order.
+#[actix_web::get("/v2/{lib}/series/{id}")]
+async fn books_in_series(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, series) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Series(series), query.page.unwrap_or(1))
+}
+
+#[actix_web::get("/v2/{lib}/publishers/{id}")]
+async fn books_by_publisher(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, publisher) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Publisher(publisher), query.page.unwrap_or(1))
+}
+
 /// Everything whose title or author matches `?query=`, paginated.
 #[actix_web::get("/v2/{lib}/search")]
 async fn search(
@@ -557,6 +616,57 @@ async fn tags(
     let base = origin(&req, data.config);
     json(
         &shelves(&base, &lib, "Tags", Shelf::Tag, &entries, calibre::updated(&db)),
+        FEED,
+    )
+}
+
+/// a plain `series` would shadow bindings of that name in this module (same as `books` vs `all_books`)
+#[actix_web::get("/v2/{lib}/series")]
+async fn all_series(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let entries = match calibre::series_with_books(&db) {
+        Ok(entries) => entries,
+        Err(e) => return server_error("Error querying series", e),
+    };
+
+    let base = origin(&req, data.config);
+    json(
+        &shelves(&base, &lib, "Series", Shelf::Series, &entries, calibre::updated(&db)),
+        FEED,
+    )
+}
+
+#[actix_web::get("/v2/{lib}/publishers")]
+async fn publishers(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let entries = match calibre::publishers_with_books(&db) {
+        Ok(entries) => entries,
+        Err(e) => return server_error("Error querying publishers", e),
+    };
+
+    let base = origin(&req, data.config);
+    json(
+        &shelves(&base, &lib, "Publishers", Shelf::Publisher, &entries, calibre::updated(&db)),
         FEED,
     )
 }

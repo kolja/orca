@@ -36,7 +36,7 @@ pub struct Book {
     /// BCP47 tags
     pub languages: Vec<String>,
     pub tags: Vec<Tag>,
-    pub publisher: Option<String>,
+    pub publisher: Option<Publisher>,
     pub series: Option<Series>,
 }
 
@@ -48,6 +48,12 @@ pub struct Author {
 
 #[derive(Debug, Serialize)]
 pub struct Tag {
+    pub id: i32,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Publisher {
     pub id: i32,
     pub name: String,
 }
@@ -64,6 +70,7 @@ pub struct Category {
 /// The series a book is part of. Calibre lets a book belong to one at most.
 #[derive(Debug, Serialize)]
 pub struct Series {
+    pub id: i32,
     pub name: String,
     /// Calibre's `series_index`: volume in series (could also be 1.5)
     pub index: f64,
@@ -192,6 +199,30 @@ pub fn tags_with_books(db: &Connection) -> rusqlite::Result<Vec<Category>> {
     )
 }
 
+/// Every series with a volume in the library
+pub fn series_with_books(db: &Connection) -> rusqlite::Result<Vec<Category>> {
+    categories(
+        db,
+        "SELECT s.id, s.name, COUNT(bs.book) AS books
+            FROM series s
+            JOIN books_series_link bs ON s.id = bs.series
+            GROUP BY s.id
+            ORDER BY s.sort;",
+    )
+}
+
+/// Every publisher with a book to its name
+pub fn publishers_with_books(db: &Connection) -> rusqlite::Result<Vec<Category>> {
+    categories(
+        db,
+        "SELECT p.id, p.name, COUNT(bp.book) AS books
+            FROM publishers p
+            JOIN books_publishers_link bp ON p.id = bp.publisher
+            GROUP BY p.id
+            ORDER BY p.name;",
+    )
+}
+
 fn categories(db: &Connection, sql: &str) -> rusqlite::Result<Vec<Category>> {
     let mut stmt = db.prepare(sql)?;
     let rows = stmt.query_map(params![], |row| {
@@ -212,6 +243,14 @@ pub fn author_name(db: &Connection, id: i32) -> rusqlite::Result<String> {
 /// The name of one tag, or `QueryReturnedNoRows`.
 pub fn tag_name(db: &Connection, id: i32) -> rusqlite::Result<String> {
     name_of(db, "tags", id)
+}
+
+pub fn series_name(db: &Connection, id: i32) -> rusqlite::Result<String> {
+    name_of(db, "series", id)
+}
+
+pub fn publisher_name(db: &Connection, id: i32) -> rusqlite::Result<String> {
+    name_of(db, "publishers", id)
 }
 
 fn name_of(db: &Connection, table: &str, id: i32) -> rusqlite::Result<String> {
@@ -259,22 +298,27 @@ pub fn count_books(db: &Connection) -> rusqlite::Result<usize> {
 #[derive(Debug, Serialize)]
 pub struct Counts {
     pub books: usize,
-    /// Only authors and tags related to a book
     pub authors: usize,
     pub tags: usize,
+    pub series: usize,
+    pub publishers: usize,
 }
 
 pub fn counts(db: &Connection) -> rusqlite::Result<Counts> {
     db.query_row(
         "SELECT (SELECT COUNT(*) FROM books),
                 (SELECT COUNT(DISTINCT author) FROM books_authors_link),
-                (SELECT COUNT(DISTINCT tag) FROM books_tags_link);",
+                (SELECT COUNT(DISTINCT tag) FROM books_tags_link),
+                (SELECT COUNT(DISTINCT series) FROM books_series_link),
+                (SELECT COUNT(DISTINCT publisher) FROM books_publishers_link);",
         params![],
         |row| {
             Ok(Counts {
                 books: row.get::<_, i64>(0)? as usize,
                 authors: row.get::<_, i64>(1)? as usize,
                 tags: row.get::<_, i64>(2)? as usize,
+                series: row.get::<_, i64>(3)? as usize,
+                publishers: row.get::<_, i64>(4)? as usize,
             })
         },
     )
@@ -389,6 +433,50 @@ pub fn books_by_author_page(
     )
 }
 
+/// One page of a series, in reading order (`series_index`)
+pub fn books_in_series_page(
+    db: &Connection,
+    series: i32,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                JOIN books_series_link bs ON b.id = bs.book
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE bs.series = ?1 GROUP BY b.id
+                ORDER BY b.series_index LIMIT ?2 OFFSET ?3;",
+            BOOK_COLUMNS
+        ),
+        params![series, limit as i64, offset as i64],
+    )
+}
+
+/// One page of a publisher's books, in the order the whole library is in.
+pub fn books_by_publisher_page(
+    db: &Connection,
+    publisher: i32,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                JOIN books_publishers_link bp ON b.id = bp.book
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE bp.publisher = ?1 GROUP BY b.id
+                ORDER BY b.sort LIMIT ?2 OFFSET ?3;",
+            BOOK_COLUMNS
+        ),
+        params![publisher, limit as i64, offset as i64],
+    )
+}
+
 /// search for title or author
 const SEARCH_MATCH: &str = "b.id IN (
         SELECT s.id FROM books s WHERE s.title LIKE ?1 ESCAPE '\\'
@@ -446,6 +534,14 @@ pub fn count_books_by_author(db: &Connection, author: i32) -> rusqlite::Result<u
     count(db, "SELECT COUNT(DISTINCT book) FROM books_authors_link WHERE author = ?1;", params![author])
 }
 
+pub fn count_books_in_series(db: &Connection, series: i32) -> rusqlite::Result<usize> {
+    count(db, "SELECT COUNT(DISTINCT book) FROM books_series_link WHERE series = ?1;", params![series])
+}
+
+pub fn count_books_by_publisher(db: &Connection, publisher: i32) -> rusqlite::Result<usize> {
+    count(db, "SELECT COUNT(DISTINCT book) FROM books_publishers_link WHERE publisher = ?1;", params![publisher])
+}
+
 fn count(db: &Connection, sql: &str, params: impl rusqlite::Params) -> rusqlite::Result<usize> {
     let total: i64 = db.query_row(sql, params, |row| row.get(0))?;
     Ok(total as usize)
@@ -480,8 +576,10 @@ pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<S
 const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, b.series_index, c.text AS synopsis,
     (SELECT GROUP_CONCAT(format)
         FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats,
+    (SELECT bs.series FROM books_series_link bs WHERE bs.book = b.id) AS series_id,
     (SELECT s.name FROM books_series_link bs JOIN series s ON bs.series = s.id
         WHERE bs.book = b.id) AS series,
+    (SELECT bp.publisher FROM books_publishers_link bp WHERE bp.book = b.id) AS publisher_id,
     (SELECT p.name FROM books_publishers_link bp JOIN publishers p ON bp.publisher = p.id
         WHERE bp.book = b.id) AS publisher";
 
@@ -499,8 +597,16 @@ fn query_books(
             .get::<_, Option<String>>("series")
             .unwrap_or(None)
             .map(|name| Series {
+                id: row.get("series_id").unwrap_or_default(),
                 name,
                 index: row.get("series_index").unwrap_or(1.0),
+            });
+        let publisher = row
+            .get::<_, Option<String>>("publisher")
+            .unwrap_or(None)
+            .map(|name| Publisher {
+                id: row.get("publisher_id").unwrap_or_default(),
+                name,
             });
         Ok(Book {
             id: row.get("id")?,
@@ -514,7 +620,7 @@ fn query_books(
             authors: Vec::new(),
             languages: Vec::new(),
             tags: Vec::new(),
-            publisher: row.get("publisher").unwrap_or(None),
+            publisher,
             series,
         })
     })?;
@@ -803,7 +909,11 @@ mod tests {
         let series = patrol.series.expect("a series");
         assert_eq!(series.name, "Astounding Stories");
         assert_eq!(series.index, 3.0);
-        assert_eq!(patrol.publisher.as_deref(), Some("Street & Smith"));
+
+        assert_eq!(series.id, 1);
+        let publisher = patrol.publisher.expect("a publisher");
+        assert_eq!(publisher.name, "Street & Smith");
+        assert_eq!(publisher.id, 4);
 
         let tags: Vec<&str> = patrol.tags.iter().map(|tag| tag.name.as_str()).collect();
         assert_eq!(tags, ["science fiction", "space opera"]);

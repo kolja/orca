@@ -200,8 +200,8 @@ pub struct BookMetadata {
     pub modified: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub publisher: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub publisher: Vec<Contributor>,
     /// What the book is about, each subject linking to the feed of its own tag.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub subject: Vec<Subject>,
@@ -237,9 +237,13 @@ pub struct BelongsTo {
 #[derive(Debug, Serialize)]
 pub struct Series {
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub identifier: Option<String>,
     /// `series_index` can be 1.5 in Calibre
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<Link>,
 }
 
 #[cfg(test)]
@@ -309,7 +313,10 @@ mod tests {
             published: None,
             modified: None,
             description: None,
-            publisher: Some("Street & Smith".to_string()),
+            publisher: vec![Contributor {
+                name: "Street & Smith".to_string(),
+                links: Vec::new(),
+            }],
             subject: vec![Subject {
                 name: "science fiction".to_string(),
                 links: Vec::new(),
@@ -317,7 +324,9 @@ mod tests {
             belongs_to: Some(BelongsTo {
                 series: Series {
                     name: "Astounding Stories".to_string(),
+                    identifier: None,
                     position: Some(3.0),
+                    links: vec![Link::new("/v2/library/series/1").mime(FEED)],
                 },
             }),
         };
@@ -328,10 +337,14 @@ mod tests {
                 "@type": "http://schema.org/Book",
                 "title": "Galactic Patrol",
                 "author": [{ "name": "E. E. Smith" }],
-                "publisher": "Street & Smith",
+                "publisher": [{ "name": "Street & Smith" }],
                 "subject": [{ "name": "science fiction" }],
                 "belongsTo": {
-                    "series": { "name": "Astounding Stories", "position": 3.0 },
+                    "series": {
+                        "name": "Astounding Stories",
+                        "position": 3.0,
+                        "links": [{ "href": "/v2/library/series/1", "type": "application/opds+json" }],
+                    },
                 },
             })
         );

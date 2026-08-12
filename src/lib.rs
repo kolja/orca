@@ -151,8 +151,12 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(routes_v2::single_book);
     cfg.service(routes_v2::authors);
     cfg.service(routes_v2::tags);
+    cfg.service(routes_v2::all_series);
+    cfg.service(routes_v2::publishers);
     cfg.service(routes_v2::books_by_author);
     cfg.service(routes_v2::books_by_tag);
+    cfg.service(routes_v2::books_in_series);
+    cfg.service(routes_v2::books_by_publisher);
     cfg.service(routes_v2::search);
 
     cfg.service(index);

@@ -58,12 +58,14 @@ async fn a_library_offers_its_books() {
     assert_eq!(library["metadata"]["title"], "library");
     assert_eq!(
         titles(&library["navigation"]),
-        ["All Books", "Recently Added", "Authors", "Tags"]
+        ["All Books", "Recently Added", "Authors", "Tags", "Series", "Publishers"]
     );
-    // Seven books, by eight authors, under seven tags.
+    // Seven books, by eight authors, seven tags, one series, three publishers.
     assert_eq!(library["navigation"][0]["properties"]["numberOfItems"], 7);
     assert_eq!(library["navigation"][2]["properties"]["numberOfItems"], 8);
     assert_eq!(library["navigation"][3]["properties"]["numberOfItems"], 7);
+    assert_eq!(library["navigation"][4]["properties"]["numberOfItems"], 1);
+    assert_eq!(library["navigation"][5]["properties"]["numberOfItems"], 3);
 }
 
 // ------- Browsing by author and by tag -------
@@ -121,7 +123,12 @@ async fn a_shelf_holds_only_what_belongs_on_it() {
 async fn a_shelf_that_is_not_there_is_404() {
     let app = setup(&TEST_HTTP_CONFIG).await;
 
-    for path in ["/v2/library/authors/99999", "/v2/library/tags/99999"] {
+    for path in [
+        "/v2/library/authors/99999",
+        "/v2/library/tags/99999",
+        "/v2/library/series/99999",
+        "/v2/library/publishers/99999",
+    ] {
         assert_eq!(call_authorized(&app, path).await.status(), StatusCode::NOT_FOUND, "{}", path);
     }
 }
@@ -160,6 +167,89 @@ async fn an_author_and_a_subject_lead_to_their_own_feeds() {
             "Alice's Adventures in Wonderland"
         );
     }
+}
+
+// ------- Browsing by series and by publisher -------
+
+#[test]
+async fn the_library_can_be_browsed_by_series_and_by_publisher() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    for (path, title, first, count) in [
+        ("/v2/library/series", "library | Series", "Astounding Stories", 3),
+        ("/v2/library/publishers", "library | Publishers", "Gutenberg Project", 2),
+    ] {
+        let shelves = feed(&app, path).await;
+        validates(&shelves, FEED);
+        assert_eq!(shelves["metadata"]["title"], title);
+        assert_eq!(titles(&shelves["navigation"])[0], first);
+        assert_eq!(shelves["navigation"][0]["properties"]["numberOfItems"], count);
+    }
+}
+
+#[test]
+async fn a_series_stands_in_reading_order() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let astounding = feed(&app, "/v2/library/series/1").await;
+
+    validates(&astounding, FEED);
+    assert_eq!(astounding["metadata"]["title"], "library | Astounding Stories");
+    assert_eq!(
+        titles_of_publications(&astounding),
+        ["Vampires of Space", "At the Mountains of Madness", "Galactic Patrol"]
+    );
+
+    // ordered by volume numbers, not titles.
+    assert_eq!(
+        positions(&astounding),
+        [1.0, 2.0, 3.0],
+        "the volumes are not in the order Calibre numbers them"
+    );
+}
+
+#[test]
+async fn a_publisher_holds_everything_it_put_out() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let street_and_smith = feed(&app, "/v2/library/publishers/4").await;
+
+    validates(&street_and_smith, FEED);
+    assert_eq!(street_and_smith["metadata"]["title"], "library | Street & Smith");
+    assert_eq!(street_and_smith["metadata"]["numberOfItems"], 3);
+}
+
+#[test]
+async fn a_series_and_a_publisher_lead_to_their_own_feeds() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let patrol = publication(&app, 9).await;
+
+    let series = &patrol["metadata"]["belongsTo"]["series"];
+    assert_eq!(series["links"][0]["href"], "http://localhost:8080/v2/library/series/1");
+    assert_eq!(series["links"][0]["type"], "application/opds+json");
+    // The same series wherever it turns up, whatever a feed calls it.
+    assert_eq!(series["identifier"], "urn:orca:library:series:1");
+
+    let publisher = &patrol["metadata"]["publisher"][0];
+    assert_eq!(publisher["links"][0]["href"], "http://localhost:8080/v2/library/publishers/4");
+
+    // Both lead somewhere that holds the book they came from.
+    for path in ["/v2/library/series/1", "/v2/library/publishers/4"] {
+        let shelf = feed(&app, path).await;
+        assert!(
+            titles_of_publications(&shelf).contains(&"Galactic Patrol".to_string()),
+            "{} does not hold the book that links to it",
+            path
+        );
+    }
+}
+
+#[test]
+async fn a_book_no_one_published_says_so_by_saying_nothing() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let aelita = publication(&app, 2).await;
+
+    assert!(aelita["metadata"].get("publisher").is_none());
+    assert!(aelita["metadata"].get("belongsTo").is_none());
+    validates(&aelita, PUBLICATION);
 }
 
 #[test]
@@ -204,6 +294,10 @@ async fn a_library_that_is_not_there_is_404() {
         "/v2/nope/authors/4",
         "/v2/nope/tags",
         "/v2/nope/tags/9",
+        "/v2/nope/series",
+        "/v2/nope/series/1",
+        "/v2/nope/publishers",
+        "/v2/nope/publishers/4",
     ] {
         assert_eq!(call_authorized(&app, path).await.status(), StatusCode::NOT_FOUND, "{}", path);
     }
@@ -222,6 +316,10 @@ async fn opds2_is_no_more_public_than_opds1() {
         "/v2/library/authors/4",
         "/v2/library/tags",
         "/v2/library/tags/9",
+        "/v2/library/series",
+        "/v2/library/series/1",
+        "/v2/library/publishers",
+        "/v2/library/publishers/4",
     ] {
         assert_eq!(call(&app, path).await.status(), StatusCode::UNAUTHORIZED, "{}", path);
     }
@@ -314,7 +412,7 @@ async fn a_publication_carries_the_shelf_it_came_off() {
 
     validates(&patrol, PUBLICATION);
     let metadata = &patrol["metadata"];
-    assert_eq!(metadata["publisher"], "Street & Smith");
+    assert_eq!(metadata["publisher"][0]["name"], "Street & Smith");
     assert_eq!(names(&metadata["subject"]), ["science fiction", "space opera"]);
     assert_eq!(metadata["belongsTo"]["series"]["name"], "Astounding Stories");
     // Third of the three Astounding Stories in the library.
@@ -635,6 +733,30 @@ fn names(values: &Value) -> Vec<String> {
 
 fn rels(links: &Value) -> Vec<String> {
     collect(links, "rel")
+}
+
+/// The books a feed holds, in order
+fn titles_of_publications(feed: &Value) -> Vec<String> {
+    feed["publications"]
+        .as_array()
+        .expect("publications")
+        .iter()
+        .map(|publication| publication["metadata"]["title"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// Where each book of a feed sits in its series.
+fn positions(feed: &Value) -> Vec<f64> {
+    feed["publications"]
+        .as_array()
+        .expect("publications")
+        .iter()
+        .map(|publication| {
+            publication["metadata"]["belongsTo"]["series"]["position"]
+                .as_f64()
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 fn collect(links: &Value, key: &str) -> Vec<String> {

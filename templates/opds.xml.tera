@@ -1,38 +1,60 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
-
-<title>{{ lib }}</title>
-
-  <entry>
-    <title>Authors</title>
-    <id>urn:orca:{{ lib }}:authors</id>
-    <link href="/{{ lib }}/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">Authors</content>
-  </entry>
-
-  <entry>
-    <title>Tags</title>
-    <id>urn:orca:{{ lib }}:tags</id>
-    <link href="/{{ lib }}/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">Tags</content>
-  </entry>
+  <title>{{ lib }}</title>
 
   <entry>
     <title>All Books</title>
     <id>urn:orca:{{ lib }}:books</id>
-  <link href="/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+    <link href="{{ base }}/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
     <updated>{{ updated }}</updated>
-    <content type="text">All Books (Titles)</content>
+    <content type="text">All {{ counts.books }} books, by title</content>
   </entry>
 
   <entry>
     <title>Recently Added</title>
     <id>urn:orca:{{ lib }}:new</id>
-  <link href="/{{ lib }}/new" rel="http://opds-spec.org/sort/new" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+    <link href="{{ base }}/{{ lib }}/new" rel="http://opds-spec.org/sort/new" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
     <updated>{{ updated }}</updated>
     <content type="text">The newest additions to the library</content>
   </entry>
-{% endblock content %}
+  {%- if counts.authors > 0 %}
 
+  <entry>
+    <title>Authors</title>
+    <id>urn:orca:{{ lib }}:authors</id>
+    <link href="{{ base }}/{{ lib }}/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
+    <content type="text">{{ counts.authors }} authors</content>
+  </entry>
+  {%- endif %}
+  {%- if counts.tags > 0 %}
+
+  <entry>
+    <title>Tags</title>
+    <id>urn:orca:{{ lib }}:tags</id>
+    <link href="{{ base }}/{{ lib }}/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
+    <content type="text">{{ counts.tags }} tags</content>
+  </entry>
+  {%- endif %}
+  {%- if counts.series > 0 %}
+
+  <entry>
+    <title>Series</title>
+    <id>urn:orca:{{ lib }}:series</id>
+    <link href="{{ base }}/{{ lib }}/series" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
+    <content type="text">{{ counts.series }} series</content>
+  </entry>
+  {%- endif %}
+  {%- if counts.publishers > 0 %}
+
+  <entry>
+    <title>Publishers</title>
+    <id>urn:orca:{{ lib }}:publishers</id>
+    <link href="{{ base }}/{{ lib }}/publishers" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+    <updated>{{ updated }}</updated>
+    <content type="text">{{ counts.publishers }} publishers</content>
+  </entry>
+  {%- endif %}
+{% endblock content %}

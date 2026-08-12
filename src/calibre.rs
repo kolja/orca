@@ -30,8 +30,7 @@ pub struct Book {
     /// Calibre's comment, as the HTML it is stored as. `plain_text` renders it.
     pub synopsis: String,
     pub has_cover: bool,
-    /// epub, azw3, cbz ...
-    pub formats: Vec<String>,
+    pub formats: Vec<Format>,
     pub authors: Vec<Author>,
     /// BCP47 tags
     pub languages: Vec<String>,
@@ -58,8 +57,17 @@ pub struct Publisher {
     pub name: String,
 }
 
+/// One file of a book
+#[derive(Debug, Serialize)]
+pub struct Format {
+    /// epub, azw3, cbz...
+    pub name: String,
+    /// octets for the `length` on an acquisition link: so you can know how big a download is going to be
+    pub size: i64,
+}
+
 /// One of the categories Calibre files a library under -- an author or a tag
-/// This is the signpost / link. `Author` and `Tag` belong to a book, count lives here
+/// This is a link. `Author` and `Tag` belong to a book, count lives here
 #[derive(Debug, Serialize)]
 pub struct Category {
     pub id: i32,
@@ -82,17 +90,7 @@ pub fn plain_text(html: &str, width: usize) -> String {
     from_read(html.as_bytes(), width).unwrap_or_default()
 }
 
-/// Calibre keeps book formats as CSV. All are offered for download
-/// no matter if the mime-type is known to orca or not.
-fn parse_formats(concatenated: &str) -> Vec<String> {
-    concatenated
-        .split(',')
-        .filter(|format| !format.is_empty())
-        .map(str::to_lowercase)
-        .collect()
-}
-
-/// The mime type of a Calibre format, as `parse_formats` spells it.
+/// The mime type of a Calibre format, as `Format::name` spells it.
 pub fn mime(format: &str) -> &'static str {
     match format {
         "epub" => "application/epub+zip",
@@ -151,28 +149,6 @@ fn collect_rows<T>(rows: impl Iterator<Item = rusqlite::Result<T>>, what: &str) 
         }
     })
     .collect()
-}
-
-pub fn authors(db: &Connection) -> rusqlite::Result<Vec<Author>> {
-    let mut stmt = db.prepare("SELECT id, name FROM authors;")?;
-    let rows = stmt.query_map(params![], |row| {
-        Ok(Author {
-            id: row.get(0)?,
-            name: row.get(1)?,
-        })
-    })?;
-    Ok(collect_rows(rows, "author"))
-}
-
-pub fn tags(db: &Connection) -> rusqlite::Result<Vec<Tag>> {
-    let mut stmt = db.prepare("SELECT id, name FROM tags;")?;
-    let rows = stmt.query_map(params![], |row| {
-        Ok(Tag {
-            id: row.get(0)?,
-            name: row.get(1)?,
-        })
-    })?;
-    Ok(collect_rows(rows, "tag"))
 }
 
 /// Every author that has a book in the library
@@ -261,19 +237,6 @@ fn name_of(db: &Connection, table: &str, id: i32) -> rusqlite::Result<String> {
     )
 }
 
-pub fn books(db: &Connection) -> rusqlite::Result<Vec<Book>> {
-    query_books(
-        db,
-        &format!(
-            "SELECT {}
-                FROM books b
-                LEFT JOIN comments c ON b.id = c.book;",
-            BOOK_COLUMNS
-        ),
-        params![],
-    )
-}
-
 /// One page of the library, ordered by the sort title Calibre keeps for this purpose.
 pub fn books_page(db: &Connection, limit: usize, offset: usize) -> rusqlite::Result<Vec<Book>> {
     query_books(
@@ -356,36 +319,6 @@ pub fn recently_added(db: &Connection) -> rusqlite::Result<Vec<Book>> {
             BOOK_COLUMNS, RECENTLY_ADDED
         ),
         params![],
-    )
-}
-
-pub fn books_by_tag(db: &Connection, tag: i32) -> rusqlite::Result<Vec<Book>> {
-    query_books(
-        db,
-        &format!(
-            "SELECT {}
-                FROM books b
-                JOIN books_tags_link bt ON b.id = bt.book
-                LEFT JOIN comments c ON b.id = c.book
-                WHERE bt.tag = ?1 GROUP BY b.id;",
-            BOOK_COLUMNS
-        ),
-        params![tag],
-    )
-}
-
-pub fn books_by_author(db: &Connection, author: i32) -> rusqlite::Result<Vec<Book>> {
-    query_books(
-        db,
-        &format!(
-            "SELECT {}
-                FROM books b
-                JOIN books_authors_link ba ON b.id = ba.book
-                LEFT JOIN comments c ON b.id = c.book
-                WHERE ba.author = ?1 GROUP BY b.id;",
-            BOOK_COLUMNS
-        ),
-        params![author],
     )
 }
 
@@ -572,10 +505,7 @@ pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<S
 }
 
 /// The columns every book feed needs.
-/// `GROUP_CONCAT` : a client should not see the download links shuffle between requests
 const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, b.series_index, c.text AS synopsis,
-    (SELECT GROUP_CONCAT(format)
-        FROM (SELECT format FROM data WHERE book = b.id ORDER BY format)) AS formats,
     (SELECT bs.series FROM books_series_link bs WHERE bs.book = b.id) AS series_id,
     (SELECT s.name FROM books_series_link bs JOIN series s ON bs.series = s.id
         WHERE bs.book = b.id) AS series,
@@ -591,7 +521,6 @@ fn query_books(
 ) -> rusqlite::Result<Vec<Book>> {
     let mut stmt = db.prepare(sql)?;
     let rows = stmt.query_map(params, |row| {
-        let formats = parse_formats(&row.get::<_, String>("formats").unwrap_or_default());
         // no `series_intex` if the book is not part of a series
         let series = row
             .get::<_, Option<String>>("series")
@@ -616,7 +545,7 @@ fn query_books(
             updated: to_rfc3339(&row.get::<_, String>("last_modified")?),
             synopsis: row.get("synopsis").unwrap_or_default(),
             has_cover: row.get("has_cover").unwrap_or(false),
-            formats,
+            formats: Vec::new(),
             authors: Vec::new(),
             languages: Vec::new(),
             tags: Vec::new(),
@@ -630,10 +559,12 @@ fn query_books(
     let mut authors = authors_by_book(db, &book_ids)?;
     let mut languages = languages_by_book(db, &book_ids)?;
     let mut tags = tags_by_book(db, &book_ids)?;
+    let mut formats = formats_by_book(db, &book_ids)?;
     for book in &mut books {
         book.authors = authors.remove(&book.id).unwrap_or_default();
         book.languages = languages.remove(&book.id).unwrap_or_default();
         book.tags = tags.remove(&book.id).unwrap_or_default();
+        book.formats = formats.remove(&book.id).unwrap_or_default();
     }
     Ok(books)
 }
@@ -694,6 +625,35 @@ fn tags_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMap<i
     })?;
 
     Ok(group_by_book(collect_rows(rows, "book tag")))
+}
+
+/// The files of each of the given books, by book id.
+/// every format is offered, no matter if the mime type is known or not
+fn formats_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMap<i32, Vec<Format>>> {
+    if book_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut stmt = db.prepare(&format!(
+        "SELECT d.book, d.format, d.uncompressed_size
+            FROM data d
+            WHERE d.book IN ({})
+            ORDER BY d.book, d.format;",
+        placeholders(book_ids.len())
+    ))?;
+
+    let rows = stmt.query_map(params_from_iter(book_ids), |row| {
+        Ok((
+            row.get::<_, i32>(0)?,
+            Format {
+                // Calibre spells them in upper case, every route of Orca's in lower.
+                name: row.get::<_, String>(1)?.to_lowercase(),
+                size: row.get(2).unwrap_or_default(),
+            },
+        ))
+    })?;
+
+    Ok(group_by_book(collect_rows(rows, "book format")))
 }
 
 /// The languages of each of the given books, by book id.
@@ -767,7 +727,7 @@ mod tests {
     #[test]
     fn books_carry_their_language() {
         let db = library();
-        let books = books(&db).expect("books");
+        let books = books_page(&db, 50, 0).expect("books");
 
         let kant = books.iter().find(|book| book.id == 5).expect("Kant");
         assert_eq!(kant.languages, ["de"]);
@@ -776,30 +736,38 @@ mod tests {
         assert_eq!(tolstoy.languages, ["ru"]);
     }
 
+    fn formats_of(book: &Book) -> Vec<&str> {
+        book.formats.iter().map(|format| format.name.as_str()).collect()
+    }
+
     // Dropping a format Orca has no mime type for would leave a book that is
     // only stored as azw3 with nothing to download at all.
     #[test]
     fn every_format_is_offered_however_exotic() {
-        assert_eq!(parse_formats("EPUB,AZW3,CBZ"), ["epub", "azw3", "cbz"]);
         assert_eq!(mime("azw3"), "application/vnd.amazon.mobi8-ebook");
         assert_eq!(mime("epub"), "application/epub+zip");
         // What Orca cannot name, the client may still know what to do with.
         assert_eq!(mime("foo"), "application/octet-stream");
     }
 
-    // GROUP_CONCAT over no rows is NULL, which reads back as "".
-    #[test]
-    fn a_book_with_no_files_has_no_formats() {
-        assert!(parse_formats("").is_empty());
-    }
-
     #[test]
     fn books_carry_every_format_the_library_holds() {
         let db = library();
-        let books = books(&db).expect("books");
+        let books = books_page(&db, 50, 0).expect("books");
 
         let alice = books.iter().find(|book| book.id == 4).expect("Alice");
-        assert_eq!(alice.formats, ["azw3", "epub"]);
+        assert_eq!(formats_of(alice), ["azw3", "epub"]);
+    }
+
+    // Atom wants a `length` on an acquisition link, and Calibre already knows it
+    #[test]
+    fn a_format_knows_how_big_it_is() {
+        let db = library();
+        let alice = book(&db, 4).expect("Alice");
+
+        for format in &alice.formats {
+            assert!(format.size > 0, "{} should have a size", format.name);
+        }
     }
 
     // Every page has to be a window on the same order, so that paging through
@@ -896,7 +864,7 @@ mod tests {
         let alice = book(&db, 4).expect("Alice");
 
         assert_eq!(alice.title, "Alice's Adventures in Wonderland");
-        assert_eq!(alice.formats, ["azw3", "epub"]);
+        assert_eq!(formats_of(&alice), ["azw3", "epub"]);
         assert_eq!(alice.authors[0].name, "Lewis Carroll");
         assert!(alice.has_cover);
     }
@@ -985,7 +953,7 @@ mod tests {
     #[test]
     fn a_feed_with_no_books_asks_for_no_authors() {
         let db = library();
-        assert!(books_by_tag(&db, 99999).expect("no books").is_empty());
+        assert!(books_by_tag_page(&db, 99999, 50, 0).expect("no books").is_empty());
     }
 
     // a wildcard is just a regular character.

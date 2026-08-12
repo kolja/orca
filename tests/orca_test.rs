@@ -14,6 +14,9 @@ enum Protocol {
 }
 use Protocol::{Http, Https};
 
+/// the feeds carry no relative links
+const BASE: &str = "http://localhost:8080";
+
 static TEST_HTTP_CONFIG: Lazy<Config> = Lazy::new(|| {
     read_config("tests/orca.http.test.toml").expect("Failed to read test config")
 });
@@ -115,8 +118,13 @@ async fn each_feed_carries_its_own_id() {
         ("/library/books", "<id>urn:orca:library:books</id>"),
         ("/library/authors", "<id>urn:orca:library:authors</id>"),
         ("/library/tags", "<id>urn:orca:library:tags</id>"),
+        ("/library/series", "<id>urn:orca:library:series</id>"),
+        ("/library/publishers", "<id>urn:orca:library:publishers</id>"),
         ("/library/authors/5", "<id>urn:orca:library:authors:5</id>"),
         ("/library/tags/5", "<id>urn:orca:library:tags:5</id>"),
+        ("/library/series/1", "<id>urn:orca:library:series:1</id>"),
+        ("/library/publishers/4", "<id>urn:orca:library:publishers:4</id>"),
+        ("/library/search?query=alice", "<id>urn:orca:library:search</id>"),
     ] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -138,8 +146,13 @@ async fn entries_are_identified_by_what_they_refer_to() {
         ("/library", "<id>urn:orca:library:authors</id>"),
         ("/library", "<id>urn:orca:library:tags</id>"),
         ("/library", "<id>urn:orca:library:books</id>"),
+        ("/library", "<id>urn:orca:library:series</id>"),
+        ("/library", "<id>urn:orca:library:publishers</id>"),
         ("/library/authors", "<id>urn:orca:library:author:5</id>"),
         ("/library/tags", "<id>urn:orca:library:tag:5</id>"),
+        ("/library/publishers", "<id>urn:orca:library:publisher:4</id>"),
+        // The one category whose singular is its plural.
+        ("/library/series", "<id>urn:orca:library:series:1</id>"),
     ] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -211,22 +224,12 @@ async fn feeds_of_books_are_advertised_as_acquisition_feeds() {
         ("/library", "/library/new"),
         ("/library/authors", "/library/authors/5"),
         ("/library/tags", "/library/tags/5"),
+        ("/library/series", "/library/series/1"),
+        ("/library/publishers", "/library/publishers/4"),
     ] {
-        let req = test::TestRequest::with_uri(path)
-            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-        let body = test::read_body(resp).await;
-        let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+        let content = body_of(&app, path, &credentials).await;
 
-        let link = content
-            .split(&format!("href=\"{}\"", href))
-            .nth(1)
-            .unwrap_or_else(|| panic!("{} has no link to {}", path, href))
-            .split("/>")
-            .next()
-            .unwrap_or_default()
-            .to_string();
+        let link = link_to(&content, href);
         assert!(
             link.contains("kind=acquisition"),
             "the link from {} to {} should be an acquisition feed, got:{}",
@@ -381,27 +384,44 @@ fn book_feed_context(config: &Config, books: serde_json::Value) -> tera::Context
     context.insert("self_url", "http://localhost:8888/library/books");
     context.insert("feed_id", "urn:orca:library:books");
     context.insert("updated", "2026-01-01T00:00:00+00:00");
-    context.insert("feed_title", "library | 1 books");
+    context.insert("feed_title", "library | All Books");
     context.insert("author", "orca");
     context.insert("version", "0.0.0");
     context.insert("repository", "https://example.invalid/orca");
+    context.insert("kind", "acquisition");
+    context.insert("up", &true);
+    context.insert("paging", &serde_json::json!({
+        "total": 1, "per_page": 50, "start": 1, "links": [],
+    }));
     context.insert("books", &books);
     context
+}
+
+fn a_book(title: &str, formats: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "id": 999,
+        "uuid": "",
+        "title": title,
+        "pubdate": "2026-01-01T00:00:00+00:00",
+        "updated": "2026-01-01T00:00:00+00:00",
+        "synopsis": "",
+        "has_cover": true,
+        "formats": formats,
+        "authors": [],
+        "languages": [],
+        "tags": [],
+        "publisher": null,
+        "series": null,
+    })
 }
 
 #[test]
 async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
-    let context = book_feed_context(state.config, serde_json::json!([{
-        "id": 999,
-        "uuid": "",
-        "title": "A Book From The Before Times",
-        "pubdate": "2026-01-01T00:00:00+00:00",
-        "updated": "2026-01-01T00:00:00+00:00",
-        "synopsis": "",
-        "authors": [],
-        "formats": ["epub"]
-    }]));
+    let context = book_feed_context(
+        state.config,
+        serde_json::json!([a_book("A Book From The Before Times", serde_json::json!([{"name": "epub", "size": 1}]))]),
+    );
 
     let content = state
         .templates
@@ -414,15 +434,13 @@ async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
 #[test]
 async fn book_metadata_is_xml_escaped() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
-    let context = book_feed_context(state.config, serde_json::json!([{
-        "id": 999,
-        "title": "Fish & Chips <Special>",
-        "pubdate": "2026-01-01T00:00:00+00:00",
-        "updated": "2026-01-01T00:00:00+00:00",
-        "synopsis": "Science fact & science fiction",
-        "authors": [{"id": 1, "name": "A & B"}],
-        "formats": ["epub"]
-    }]));
+    let mut book = a_book("Fish & Chips <Special>", serde_json::json!([{"name": "epub", "size": 1}]));
+    book["synopsis"] = serde_json::json!("Science fact & science fiction");
+    book["authors"] = serde_json::json!([{"id": 1, "name": "A & B"}]);
+    book["tags"] = serde_json::json!([{"id": 1, "name": "Punch & Judy"}]);
+    book["publisher"] = serde_json::json!({"id": 1, "name": "Faber & Faber"});
+    book["series"] = serde_json::json!({"id": 1, "name": "Cloak & Dagger", "index": 1.0});
+    let context = book_feed_context(state.config, serde_json::json!([book]));
 
     let content = state
         .templates
@@ -432,6 +450,10 @@ async fn book_metadata_is_xml_escaped() {
     assert!(content.contains("Fish &amp; Chips &lt;Special&gt;"));
     assert!(content.contains("Science fact &amp; science fiction"));
     assert!(content.contains("A &amp; B"));
+    // Everything the newer entry elements carry needs escaping too.
+    assert!(content.contains(r#"term="Punch &amp; Judy""#));
+    assert!(content.contains("<dcterms:publisher>Faber &amp; Faber</dcterms:publisher>"));
+    assert!(content.contains(r#"title="Cloak &amp; Dagger""#));
     assert_eq!(count_items(&content), 1);
 }
 
@@ -439,15 +461,16 @@ async fn book_metadata_is_xml_escaped() {
 #[test]
 async fn mime_types_are_not_escaped() {
     let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
-    let context = book_feed_context(state.config, serde_json::json!([{
-        "id": 999,
-        "title": "Fish & Chips",
-        "pubdate": "2026-01-01T00:00:00+00:00",
-        "updated": "2026-01-01T00:00:00+00:00",
-        "synopsis": "Science fact & science fiction",
-        "authors": [{"id": 1, "name": "O'Brien & Sons"}],
-        "formats": ["epub", "pdf", "mobi", "cbz", "lrf"]
-    }]));
+    let mut book = a_book(
+        "Fish & Chips",
+        serde_json::json!([
+            {"name": "epub", "size": 1}, {"name": "pdf", "size": 2}, {"name": "mobi", "size": 3},
+            {"name": "cbz", "size": 4}, {"name": "foo", "size": 5},
+        ]),
+    );
+    book["synopsis"] = serde_json::json!("Science fact & science fiction");
+    book["authors"] = serde_json::json!([{"id": 1, "name": "O'Brien & Sons"}]);
+    let context = book_feed_context(state.config, serde_json::json!([book]));
 
     let content = state
         .templates
@@ -592,7 +615,8 @@ async fn a_shelf_that_is_not_there_is_404() {
     let app = setup(Http).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for uri in ["/library/tags/99999", "/library/authors/99999"] {
+    for uri in ["/library/tags/99999", "/library/authors/99999",
+                "/library/series/99999", "/library/publishers/99999"] {
         let req = test::TestRequest::with_uri(uri)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
             .to_request();
@@ -609,6 +633,9 @@ async fn unknown_library_is_not_found() {
 
     for uri in ["/nosuchlib", "/nosuchlib/books", "/nosuchlib/tags",
                 "/nosuchlib/authors", "/nosuchlib/tags/5", "/nosuchlib/authors/5",
+                "/nosuchlib/series", "/nosuchlib/publishers", "/nosuchlib/series/1",
+                "/nosuchlib/publishers/4", "/nosuchlib/search?query=alice",
+                "/nosuchlib/opensearch.xml",
                 "/nosuchlib/cover/5", "/nosuchlib/file/5/epub"] {
         let req = test::TestRequest::with_uri(uri)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -700,7 +727,7 @@ async fn co_authored_books_list_every_author() {
     assert!(content.contains("<name>Galileo Galilei</name>"));
     assert!(content.contains("<name>Johannes Kepler</name>"));
     // Author links must point at a route that exists.
-    assert!(content.contains("<uri>/library/authors/6</uri>"));
+    assert!(content.contains(&format!("<uri>{}/library/authors/6</uri>", BASE)));
     assert!(!content.contains("<uri>/author/"));
 }
 
@@ -760,6 +787,285 @@ async fn single_library_redirects_to_it() {
     assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/library");
 }
 
+// ------- New to the Atom feed in 0.2.1 -------
+
+#[test]
+async fn no_feed_carries_a_relative_link() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library", "/library/books", "/library/new", "/library/authors",
+                 "/library/tags", "/library/series", "/library/publishers",
+                 "/library/authors/5", "/library/tags/5", "/library/series/1",
+                 "/library/publishers/4", "/library/search?query=alice"] {
+        let content = body_of(&app, path, &credentials).await;
+        assert!(
+            !content.contains(r#"href="/"#),
+            "{} carries a relative href:\n{}",
+            path,
+            content
+        );
+        assert!(!content.contains("<uri>/"), "{} carries a relative <uri>", path);
+    }
+}
+
+#[test]
+async fn the_library_offers_series_and_publishers() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library", &credentials).await;
+
+    assert_eq!(
+        titles(&content),
+        ["All Books", "Recently Added", "Authors", "Tags", "Series", "Publishers"]
+    );
+    assert_eq!(count_links(&content, "/library/series"), 1);
+    assert_eq!(count_links(&content, "/library/publishers"), 1);
+}
+
+// The volume number decides the order
+#[test]
+async fn a_series_stands_in_reading_order() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library/series/1", &credentials).await;
+
+    assert_eq!(
+        titles(&content),
+        ["Vampires of Space", "At the Mountains of Madness", "Galactic Patrol"]
+    );
+}
+
+#[test]
+async fn a_publisher_holds_everything_it_put_out() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/publishers/3", &credentials).await;
+    assert_eq!(count_items(&content), 2);
+    assert!(content.contains("<title>library | Gutenberg Project</title>"));
+
+    let content = body_of(&app, "/library/publishers/4", &credentials).await;
+    assert_eq!(count_items(&content), 3);
+}
+
+#[test]
+async fn a_shelf_feed_says_which_shelf_it_is() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for (path, title) in [
+        ("/library/books", "library | All Books"),
+        ("/library/authors/5", "library | Immanuel Kant"),
+        ("/library/tags/5", "library | fiction"),
+        ("/library/series/1", "library | Astounding Stories"),
+        ("/library/publishers/2", "library | Projekt Gutenberg"),
+        ("/library/authors", "library | Authors"),
+        ("/library/series", "library | Series"),
+        ("/library/search?query=alice", "library | Search: alice"),
+    ] {
+        let content = body_of(&app, path, &credentials).await;
+        assert!(
+            content.contains(&format!("<title>{}</title>", title)),
+            "{} should be called {}",
+            path,
+            title
+        );
+    }
+}
+
+// Atom has nowhere to put a count, so a navigation entry says it in words.
+#[test]
+async fn a_navigation_entry_says_how_much_is_behind_it() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/series", &credentials).await;
+    assert!(content.contains("<content type=\"text\">3 books</content>"));
+
+    // Projekt Gutenberg published one, and one book is not "1 books".
+    let content = body_of(&app, "/library/publishers", &credentials).await;
+    assert!(content.contains("<content type=\"text\">1 book</content>"));
+    assert!(content.contains("<content type=\"text\">2 books</content>"));
+}
+
+// OPDS 1.2 carries paging in OpenSearch counts and RFC 5005 links
+#[test]
+async fn a_paged_feed_says_where_it_stands() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/books", &credentials).await;
+    assert!(content.contains("<opensearch:totalResults>7</opensearch:totalResults>"));
+    assert!(content.contains("<opensearch:itemsPerPage>50</opensearch:itemsPerPage>"));
+    assert!(content.contains("<opensearch:startIndex>1</opensearch:startIndex>"));
+    // One page: nowhere else to go.
+    assert!(!content.contains(r#"rel="next""#));
+    assert!(!content.contains(r#"rel="previous""#));
+
+    // A shelf counts its own books, not the library's.
+    let content = body_of(&app, "/library/tags/5", &credentials).await;
+    assert!(content.contains("<opensearch:totalResults>2</opensearch:totalResults>"));
+}
+
+#[test]
+async fn a_page_past_the_end_is_the_last_page() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library/books?page=9", &credentials).await;
+
+    assert_eq!(count_items(&content), 7);
+    // The one page there is wears a bare URL.
+    assert!(content.contains(&format!(r#"rel="self" href="{}/library/books""#, BASE)));
+}
+
+// Recently Added is a window on the library rather than a shelf of it.
+#[test]
+async fn the_newest_arrivals_are_not_paged() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library/new", &credentials).await;
+
+    assert!(!content.contains("opensearch:totalResults"));
+}
+
+#[test]
+async fn an_entry_carries_the_metadata_calibre_holds() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library/authors/4", &credentials).await;
+
+    // Alice: three tags, English, published by the Gutenberg Project in 2008.
+    assert!(content.contains(r#"<category term="fiction" label="fiction"/>"#));
+    assert!(content.contains(r#"<category term="children" label="children"/>"#));
+    assert!(content.contains("<dcterms:language>en</dcterms:language>"));
+    assert!(content.contains("<dcterms:publisher>Gutenberg Project</dcterms:publisher>"));
+    assert!(content.contains("<dcterms:issued>2008-06-27T00:00:00+00:00</dcterms:issued>"));
+
+    // Calibre has already counted the octets of every file it holds.
+    assert!(link_to(&content, "/library/file/4/epub").contains(r#"length="189535""#));
+    assert!(link_to(&content, "/library/file/4/azw3").contains(r#"length="256404""#));
+
+    assert!(content.contains("<summary type=\"text\">"));
+}
+
+// OPDS 1.2 cannot say "volume 3 of 5", but `related` gets a client to the rest.
+#[test]
+async fn a_book_leads_to_its_series_and_its_publisher() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/library/books", &credentials).await;
+
+    let series = link_to(&content, "/library/series/1");
+    assert!(series.contains(r#"rel="related""#), "got:{}", series);
+    assert!(series.contains(r#"title="Astounding Stories""#), "got:{}", series);
+
+    let publisher = link_to(&content, "/library/publishers/4");
+    assert!(publisher.contains(r#"rel="related""#), "got:{}", publisher);
+
+    // Tolstoy is in no series and nobody published him, so his entry says nothing.
+    let content = body_of(&app, "/library/authors/2", &credentials).await;
+    assert!(!content.contains(r#"rel="related""#));
+    assert!(!content.contains("dcterms:publisher"));
+}
+
+#[test]
+async fn every_feed_below_the_root_leads_back_up() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library/books", "/library/new", "/library/authors", "/library/tags",
+                 "/library/series", "/library/publishers", "/library/authors/5",
+                 "/library/series/1", "/library/search?query=alice"] {
+        let content = body_of(&app, path, &credentials).await;
+        assert!(
+            content.contains(&format!(r#"rel="up" href="{}/library""#, BASE)),
+            "{} should lead back to the library",
+            path
+        );
+    }
+
+    // The library root is what they lead back to, so it has no `up` of its own.
+    let content = body_of(&app, "/library", &credentials).await;
+    assert!(!content.contains(r#"rel="up""#));
+}
+
+// An OPDS 1.2 client finds search through an OpenSearch description
+#[test]
+async fn every_library_feed_advertises_its_search() {
+    let app = setup(Https).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library", "/library/books", "/library/tags", "/library2"] {
+        let content = body_of(&app, path, &credentials).await;
+        let lib = path.split('/').nth(1).unwrap();
+        assert!(
+            content.contains(&format!(
+                r#"rel="search" href="{}/{}/opensearch.xml""#,
+                BASE, lib
+            )),
+            "{} should advertise its search",
+            path
+        );
+    }
+
+    // The index spans libraries, and there is nothing there to search.
+    let content = body_of(&app, "/", &credentials).await;
+    assert!(!content.contains(r#"rel="search""#));
+}
+
+// `{searchTerms}` is OpenSearch's own spelling
+#[test]
+async fn the_opensearch_description_says_how_to_search() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let req = test::TestRequest::with_uri("/library/opensearch.xml")
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(&app, req).await;
+    assert!(resp.status().is_success());
+    assert_eq!(
+        resp.headers().get("content-type").unwrap(),
+        "application/opensearchdescription+xml"
+    );
+
+    let body = test::read_body(resp).await;
+    let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
+    assert!(content.contains(&format!(
+        r#"template="{}/library/search?query={{searchTerms}}""#,
+        BASE
+    )));
+    assert!(content.contains("<ShortName>library</ShortName>"));
+}
+
+#[test]
+async fn search_finds_a_book_by_title_and_by_author() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    let content = body_of(&app, "/library/search?query=alice", &credentials).await;
+    assert_eq!(count_items(&content), 1);
+    assert_eq!(titles(&content), ["Alice&#39;s Adventures in Wonderland"]);
+
+    // Kant wrote one book in this library, and nothing has him in the title.
+    let content = body_of(&app, "/library/search?query=kant", &credentials).await;
+    assert_eq!(titles(&content), ["Kritik der reinen Vernunft - 2. Auflage"]);
+}
+
+// A bare `%%` / empty search field should not match the whole library
+#[test]
+async fn an_empty_search_finds_nothing() {
+    let app = setup(Http).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library/search", "/library/search?query="] {
+        let content = body_of(&app, path, &credentials).await;
+        assert_eq!(count_items(&content), 0, "{} should find nothing", path);
+        assert!(content.contains("<title>library | Search</title>"));
+    }
+}
+
 // ------- Https Tests -------
 
 // The https config registers tests/calibre twice, so the root is a real
@@ -774,7 +1080,7 @@ async fn multiple_libraries_are_listed() {
     assert_eq!(count_items(&content), 2);
     assert!(content.contains("<title>library</title>"));
     assert!(content.contains("<title>library2</title>"));
-    assert!(content.contains(r#"href="/library2""#));
+    assert_eq!(count_links(&content, "/library2"), 1);
 }
 
 #[test]
@@ -852,8 +1158,34 @@ async fn body_of(
     String::from_utf8(body.to_vec()).expect("Failed to convert to String")
 }
 
-fn count_links(content: &str, href: &str) -> usize {
-    content.matches(&format!(r#"href="{}""#, href)).count()
+fn count_links(content: &str, path: &str) -> usize {
+    content.matches(&format!(r#"href="{}{}""#, BASE, path)).count()
+}
+
+fn link_to(content: &str, path: &str) -> String {
+    content
+        .split(&format!("href=\"{}{}\"", BASE, path))
+        .nth(1)
+        .unwrap_or_else(|| panic!("nothing links to {}", path))
+        .split("/>")
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The text of every `<tag>` in a feed, in the order it appears.
+fn values_of(content: &str, tag: &str) -> Vec<String> {
+    content
+        .split(&format!("<{}>", tag))
+        .skip(1)
+        .map(|tail| tail.split('<').next().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// The titles of the entries of a feed, in the order they are listed.
+fn titles(content: &str) -> Vec<String> {
+    // The feed's own <title> comes first
+    values_of(content, "title").into_iter().skip(1).collect()
 }
 
 fn count_items(content: &str) -> usize {

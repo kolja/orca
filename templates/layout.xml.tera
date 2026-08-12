@@ -1,11 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog">
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:opds="http://opds-spec.org/2010/catalog" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
   <author><name>{{ author }}</name></author>
   <generator uri="{{ repository }}" version="{{ version }}">orca</generator>
   <id>{{ feed_id }}</id>
   <updated>{{ updated }}</updated>
-  <link rel="self" href="{{ self_url }}" type="application/atom+xml;profile=opds-catalog" />
+  <link rel="self" href="{{ self_url }}" type="application/atom+xml;profile=opds-catalog;kind={{ kind }}" />
   <link rel="start" href="{{ base }}/" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
-  {% block content %}{% endblock content %}
+  {%- if up %}
+  <link rel="up" href="{{ base }}/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
+  {%- endif %}
+  {%- if lib %}
+  <link rel="search" href="{{ base }}/{{ lib }}/opensearch.xml" type="application/opensearchdescription+xml" title="Search {{ lib }}" />
+  {%- endif %}
+  {%- if paging %}
+  <opensearch:totalResults>{{ paging.total }}</opensearch:totalResults>
+  <opensearch:itemsPerPage>{{ paging.per_page }}</opensearch:itemsPerPage>
+  <opensearch:startIndex>{{ paging.start }}</opensearch:startIndex>
+  {%- for page in paging.links %}
+  <link rel="{{ page.rel }}" href="{{ page.href }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" />
+  {%- endfor %}
+  {%- endif %}
+  {%- block content %}{% endblock content %}
 </feed>
-

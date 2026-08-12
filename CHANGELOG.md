@@ -2,11 +2,26 @@
 
 ## 0.2.1
 
+- added a one-line orca demo
 - `publisher` in an OPDS 2.0 publication is an array of objects rather than a
-string, the same shape `author` has
-- browse by series (`/v2/{lib}/series`) and by publisher (`/v2/{lib}/publishers`)
+string, the same shape `author` has.
+- browse by series `{lib}/series` and by publisher `{lib}/publishers` for both OPDS v1 and v2
 - `belongsTo.series` carries a link to the rest of the series, and an identifier
-- one-line orca demo
+
+**specific to OPDS 1.2 (Atom) feeds:**
+
+- every `href` is absolute now
+- paging, by `?page=`, with `first`/`previous`/`next`/`last` links
+- search, discoverable via `opensearch.xml`
+- an entry comes with tags as `<category>`, and its language, publisher and
+publication date as `dcterms:language`, `dcterms:publisher` and `dcterms:issued`
+- an acquisition link has `length` now
+- an entry links to its series and its publisher with `rel="related"`
+- a `<summary>` beside the `<content>`
+- `rel="up"` back to the library, in every feed below it
+- a shelf feed is titled after its shelf rather than "{lib} | n books"
+- the self link's content type says `kind=navigation` or `kind=acquisition`
+- a category with no books to it is no longer listed, matching `/v2`
 
 ## 0.2.0
 

@@ -1,28 +1,43 @@
 
 {% extends "layout.xml.tera" %}
 {% block content %}
-
-<title>{{ feed_title }}</title>
-
-  {% for book in books %}
+  <title>{{ feed_title }}</title>
+  {%- for book in books %}
   <entry>
     <title>{{ book.title }}</title>
     <id>{% if book.uuid %}urn:uuid:{{ book.uuid }}{% else %}urn:orca:{{ lib }}:book:{{ book.id }}{% endif %}</id>
-  <link href="/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
-  <link href="/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
-    {% for format in book.formats %}
-  <link href="/{{ lib }}/file/{{ book.id }}/{{ format }}" type="{{ format | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format }}"/>
-    {% endfor %}
+    {%- for tag in book.tags %}
+    <category term="{{ tag.name }}" label="{{ tag.name }}"/>
+    {%- endfor %}
+    {%- for language in book.languages %}
+    <dcterms:language>{{ language }}</dcterms:language>
+    {%- endfor %}
+    {%- if book.publisher %}
+    <dcterms:publisher>{{ book.publisher.name }}</dcterms:publisher>
+    {%- endif %}
+    <dcterms:issued>{{ book.pubdate }}</dcterms:issued>
+    <link href="{{ base }}/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
+    <link href="{{ base }}/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
+    {%- if book.series %}
+    <link href="{{ base }}/{{ lib }}/series/{{ book.series.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" rel="related" title="{{ book.series.name }}"/>
+    {%- endif %}
+    {%- if book.publisher %}
+    <link href="{{ base }}/{{ lib }}/publishers/{{ book.publisher.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" rel="related" title="{{ book.publisher.name }}"/>
+    {%- endif %}
+    {%- for format in book.formats %}
+    <link href="{{ base }}/{{ lib }}/file/{{ book.id }}/{{ format.name }}" type="{{ format.name | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format.name }}" length="{{ format.size }}"/>
+    {%- endfor %}
     <updated>{{ book.updated }}</updated>
+    <summary type="text">{{ book.synopsis }}</summary>
     <content type="text">{{ book.synopsis }}</content>
-    {% for author in book.authors %}
+    {%- for author in book.authors %}
     <author>
       <name>{{ author.name }}</name>
-      <uri>/{{ lib }}/authors/{{ author.id }}</uri>
+      <uri>{{ base }}/{{ lib }}/authors/{{ author.id }}</uri>
     </author>
-    {% endfor %}
-  <published>{{ book.pubdate }}</published>
+    {%- endfor %}
+    <published>{{ book.pubdate }}</published>
   </entry>
-  {% endfor %}
+  {%- endfor %}
 
 {% endblock content %}

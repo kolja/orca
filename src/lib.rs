@@ -10,6 +10,7 @@ pub mod hash;
 pub mod opds2;
 pub mod routes;
 pub mod routes_v2;
+pub mod shelf;
 pub mod pattern;
 
 use actix_web::{web, App, HttpServer};
@@ -22,7 +23,7 @@ use tera::{Kwargs, State, Tera};
 
 use config::{Config, Protocol};
 use templates::Template;
-use routes::{health, authentication, authors, book_file, books_by_author, books_by_tag, cover, getbooks, index, logo, opds, recently_added, tags};
+use routes::{health, all_series, authentication, authors, book_file, books_by_author, books_by_publisher, books_by_tag, books_in_series, cover, getbooks, index, logo, opds, opensearch, publishers, recently_added, search, tags};
 use appstate::AppState;
 
 // Tera filter to convert format to mime type -- OPDS v2 links can use it too.
@@ -161,14 +162,20 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 
     cfg.service(index);
     cfg.service(opds);
+    cfg.service(opensearch);
+    cfg.service(search);
     cfg.service(tags);
     cfg.service(authors);
+    cfg.service(all_series);
+    cfg.service(publishers);
     cfg.service(getbooks);
     cfg.service(recently_added);
     cfg.service(book_file);
     cfg.service(cover);
     cfg.service(books_by_tag);
     cfg.service(books_by_author);
+    cfg.service(books_in_series);
+    cfg.service(books_by_publisher);
 }
 
 #[cfg(test)]

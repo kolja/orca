@@ -2,12 +2,41 @@
 use actix_web::{web, Error, HttpRequest, HttpResponse, Responder};
 use actix_web::http::header::{ContentDisposition, DispositionType};
 use actix_files as fs;
+use serde_derive::{Deserialize, Serialize};
 use tera::Tera;
 use crate::authdoc;
 use crate::authorized::Authorized;
 use crate::appstate::AppState;
 use crate::calibre;
 use crate::config::Config;
+use crate::shelf::{self, PageLink, Shelf, PER_PAGE};
+
+const ACQUISITION: &str = "acquisition"; // a feed of books
+const NAVIGATION: &str = "navigation"; // a feed of other feeds
+
+/// this is how OPDS 1.2 clients discover search
+const OPENSEARCH: &str = "application/opensearchdescription+xml";
+
+#[derive(Deserialize)]
+struct PageQuery {
+    page: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct SearchQuery {
+    query: Option<String>,
+    page: Option<usize>,
+}
+
+/// the OpenSearch counts are what a client reads to say "1-50 of 340".
+#[derive(Serialize)]
+struct Paging {
+    total: usize,
+    per_page: usize,
+    /// One-based
+    start: usize,
+    links: Vec<PageLink>,
+}
 
 /// The externally visible origin of this request, as `scheme://host` without a
 /// trailing slash. `connection_info` honours X-Forwarded-Proto / X-Forwarded-Host,
@@ -31,7 +60,7 @@ fn feed_id(path: &str) -> String {
 }
 
 /// config plus the absolute URL of this feed for `<link rel="self">`.
-/// Some clients resolve the relative hrefs of entries against the self link.
+/// Everything the layout asks about is inserted here
 fn feed_ctx(req: &HttpRequest, config: &Config, lib: Option<&str>) -> tera::Context {
     let mut ctx = tera::Context::new();
     let origin = origin(req, config);
@@ -42,10 +71,23 @@ fn feed_ctx(req: &HttpRequest, config: &Config, lib: Option<&str>) -> tera::Cont
     ctx.insert("version", env!("CARGO_PKG_VERSION"));
     ctx.insert("repository", env!("CARGO_PKG_REPOSITORY"));
     ctx.insert("config", config);
-    if let Some(lib) = lib {
-        ctx.insert("lib", lib);
-    }
+    ctx.insert("kind", NAVIGATION);
+    ctx.insert("up", &false);
+    ctx.insert("paging", &Option::<Paging>::None);
+    ctx.insert("lib", lib.unwrap_or_default());
     ctx
+}
+
+fn shelf_ctx(req: &HttpRequest, config: &Config, lib: &str, kind: &str) -> tera::Context {
+    let mut ctx = feed_ctx(req, config, Some(lib));
+    ctx.insert("up", &true);
+    ctx.insert("kind", kind);
+    ctx
+}
+
+/// root of the Atom feed (JSON is under `/v2`)
+fn root_of(req: &HttpRequest, config: &Config, lib: &str) -> String {
+    format!("{}/{}", origin(req, config), lib)
 }
 
 /// Calibre stores a blurb as HTML - Rendering / escaping happens here
@@ -62,18 +104,20 @@ pub(crate) fn server_error(what: &str, e: impl std::fmt::Display) -> HttpRespons
     HttpResponse::InternalServerError().body(what.to_string())
 }
 
-fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> HttpResponse {
+fn rendered(template: &Tera, name: &str, ctx: tera::Context, mime: &str) -> HttpResponse {
     match template.render(name, &ctx) {
-        Ok(body) => HttpResponse::Ok()
-            .content_type("application/atom+xml")
-            .body(body),
+        Ok(body) => HttpResponse::Ok().content_type(mime.to_string()).body(body),
         Err(e) => {
             eprintln!("Template rendering error: {}", e);
             HttpResponse::InternalServerError()
-                .content_type("application/atom+xml")
+                .content_type(mime.to_string())
                 .body("Template rendering error")
         }
     }
+}
+
+fn render_template(template: &Tera, name: &str, ctx: tera::Context) -> HttpResponse {
+    rendered(template, name, ctx, "application/atom+xml")
 }
 
 /// The path of a file inside a library, or a 404 for a library Orca does not serve.
@@ -95,13 +139,86 @@ fn not_found_or_500(missing: &'static str) -> impl Fn(rusqlite::Error) -> Error 
     }
 }
 
-fn missing_shelf(kind: &str, id: i32, e: rusqlite::Error) -> HttpResponse {
-    match e {
-        rusqlite::Error::QueryReturnedNoRows => {
-            HttpResponse::NotFound().body(format!("No {} with id {}", kind, id))
-        }
-        e => server_error("Error querying shelf", e),
+/// The connection of one library, or a 404 for a library Orca does not serve.
+fn library<'a>(
+    data: &'a AppState,
+    lib: &str,
+) -> Result<std::sync::MutexGuard<'a, rusqlite::Connection>, HttpResponse> {
+    match data.db.get(lib) {
+        Some(db) => Ok(calibre::lock(db)),
+        None => Err(HttpResponse::NotFound().body(format!("Database '{}' not found", lib))),
     }
+}
+
+/// One page of books
+fn books_feed(
+    data: &AppState,
+    req: &HttpRequest,
+    lib: &str,
+    shelf: Shelf,
+    requested: usize,
+) -> HttpResponse {
+    let db = match library(data, lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let name = match shelf.name(&db) {
+        Ok(name) => name,
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return HttpResponse::NotFound().body(format!("Nothing shelved under {}", shelf.path()))
+        }
+        Err(e) => return server_error("Error querying shelf", e),
+    };
+
+    let total = match shelf.count(&db) {
+        Ok(total) => total,
+        Err(e) => return server_error("Error counting books", e),
+    };
+    let window = shelf::window(total, PER_PAGE, requested);
+
+    let books = match shelf.books(&db, PER_PAGE, window.offset) {
+        Ok(books) => wrapped(books),
+        Err(e) => return server_error("Error querying books", e),
+    };
+
+    let root = root_of(req, data.config, lib);
+    let path = shelf.path();
+    let mut ctx = shelf_ctx(req, data.config, lib, ACQUISITION);
+    // `self` names the page that answered, not the feed it is one page of.
+    ctx.insert("self_url", &shelf::page_url(&root, &path, window.current));
+    ctx.insert("feed_title", &format!("{} | {}", lib, name));
+    ctx.insert("books", &books);
+    ctx.insert("updated", &calibre::updated(&db));
+    ctx.insert(
+        "paging",
+        &Paging {
+            total,
+            per_page: PER_PAGE,
+            start: window.offset + 1,
+            links: shelf::page_links(&root, &path, &window),
+        },
+    );
+    render_template(&data.templates, "books.xml.tera", ctx)
+}
+
+/// One entry per category, e.g. `Shelf::Author` for the feed of authors.
+fn shelves_feed(
+    data: &AppState,
+    req: &HttpRequest,
+    lib: &str,
+    title: &str,
+    shelf: fn(i32) -> Shelf,
+    categories: &[calibre::Category],
+    updated: String,
+) -> HttpResponse {
+    let mut ctx = shelf_ctx(req, data.config, lib, NAVIGATION);
+    ctx.insert("feed_title", &format!("{} | {}", lib, title));
+    ctx.insert("shelf", shelf::feed_of(shelf));
+    ctx.insert("noun", shelf::noun_of(shelf));
+    ctx.insert("entries", categories);
+    ctx.insert("updated", &updated);
+    render_template(&data.templates, "shelves.xml.tera", ctx)
 }
 
 fn attachment(path: &str) -> Result<fs::NamedFile, Error> {
@@ -207,17 +324,40 @@ async fn opds(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let counts = match calibre::counts(&db) {
+        Ok(counts) => counts,
+        Err(e) => return server_error("Error counting the library", e),
     };
 
     let mut ctx = feed_ctx(&req, data.config, Some(&lib));
+    ctx.insert("counts", &counts);
     ctx.insert("updated", &calibre::updated(&db));
     render_template(&data.templates, "opds.xml.tera", ctx)
 }
 
-#[actix_web::get("/{lib}/tags")]
+/// The OpenSearch description document. An OPDS 1.2 client discovers search this way.
+#[actix_web::get("/{lib}/opensearch.xml")]
+async fn opensearch(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    if let Err(response) = library(&data, &lib) {
+        return response;
+    }
+
+    let ctx = feed_ctx(&req, data.config, Some(&lib));
+    rendered(&data.templates, "opensearch.xml.tera", ctx, OPENSEARCH)
+}
+
+#[actix_web::get("{lib}/tags")]
 async fn tags(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -225,49 +365,17 @@ async fn tags(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
     };
 
-    let tags = match calibre::tags(&db) {
-        Ok(tags) => tags,
+    let entries = match calibre::tags_with_books(&db) {
+        Ok(entries) => entries,
         Err(e) => return server_error("Error querying tags", e),
     };
 
-    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
-    ctx.insert("tags", &tags);
-    ctx.insert("updated", &calibre::updated(&db));
-    render_template(&data.templates, "tags.xml.tera", ctx)
-}
-
-#[actix_web::get("{lib}/tags/{id}")]
-async fn books_by_tag(
-    data: web::Data<AppState>,
-    path: web::Path<(String, i32)>,
-    _auth: Authorized,
-    req: HttpRequest,
-) -> impl Responder {
-    let (lib, tag) = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
-    };
-
-    if let Err(e) = calibre::tag_name(&db, tag) {
-        return missing_shelf("tag", tag, e);
-    }
-
-    let books = match calibre::books_by_tag(&db, tag) {
-        Ok(books) => wrapped(books),
-        Err(e) => return server_error("Error querying books", e),
-    };
-
-    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
-    ctx.insert("feed_title", &format!("{} | {} books", lib, books.len()));
-    ctx.insert("books", &books);
-    ctx.insert("updated", &calibre::updated(&db));
-    render_template(&data.templates, "books.xml.tera", ctx)
+    shelves_feed(&data, &req, &lib, "Tags", Shelf::Tag, &entries, calibre::updated(&db))
 }
 
 #[actix_web::get("{lib}/authors")]
@@ -278,76 +386,140 @@ async fn authors(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
     };
 
-    let authors = match calibre::authors(&db) {
-        Ok(authors) => authors,
+    let entries = match calibre::authors_with_books(&db) {
+        Ok(entries) => entries,
         Err(e) => return server_error("Error querying authors", e),
     };
 
-    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
-    ctx.insert("authors", &authors);
-    ctx.insert("updated", &calibre::updated(&db));
-    render_template(&data.templates, "authors.xml.tera", ctx)
+    shelves_feed(&data, &req, &lib, "Authors", Shelf::Author, &entries, calibre::updated(&db))
 }
 
-#[actix_web::get("{lib}/authors/{id}")]
-async fn books_by_author(
-    data: web::Data<AppState>,
-    path: web::Path<(String, i32)>,
-    _auth: Authorized,
-    req: HttpRequest,
-) -> impl Responder {
-    let (lib, author) = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
-    };
-
-    if let Err(e) = calibre::author_name(&db, author) {
-        return missing_shelf("author", author, e);
-    }
-
-    let books = match calibre::books_by_author(&db, author) {
-        Ok(books) => wrapped(books),
-        Err(e) => return server_error("Error querying books", e),
-    };
-
-    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
-    ctx.insert("feed_title", &format!("{} | {} books", lib, books.len()));
-    ctx.insert("books", &books);
-    ctx.insert("updated", &calibre::updated(&db));
-    render_template(&data.templates, "books.xml.tera", ctx)
-}
-
-#[actix_web::get("{lib}/books")]
-async fn getbooks(
+/// `all_series` rather than `series`:
+/// a plural that is also a singular would shadow every binding of that name.
+#[actix_web::get("{lib}/series")]
+async fn all_series(
     data: web::Data<AppState>,
     path: web::Path<String>,
     _auth: Authorized,
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
     };
 
-    let books = match calibre::books(&db) {
-        Ok(books) => wrapped(books),
-        Err(e) => return server_error("Error querying books", e),
+    let entries = match calibre::series_with_books(&db) {
+        Ok(entries) => entries,
+        Err(e) => return server_error("Error querying series", e),
     };
 
-    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
-    ctx.insert("feed_title", &format!("{} | {} books", lib, books.len()));
-    ctx.insert("books", &books);
-    ctx.insert("updated", &calibre::updated(&db));
-    render_template(&data.templates, "books.xml.tera", ctx)
+    shelves_feed(&data, &req, &lib, "Series", Shelf::Series, &entries, calibre::updated(&db))
 }
 
+#[actix_web::get("{lib}/publishers")]
+async fn publishers(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let entries = match calibre::publishers_with_books(&db) {
+        Ok(entries) => entries,
+        Err(e) => return server_error("Error querying publishers", e),
+    };
+
+    shelves_feed(&data, &req, &lib, "Publishers", Shelf::Publisher, &entries, calibre::updated(&db))
+}
+
+#[actix_web::get("{lib}/books")]
+async fn getbooks(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Everything, query.page.unwrap_or(1))
+}
+
+#[actix_web::get("{lib}/tags/{id}")]
+async fn books_by_tag(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, tag) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Tag(tag), query.page.unwrap_or(1))
+}
+
+#[actix_web::get("{lib}/authors/{id}")]
+async fn books_by_author(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, author) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Author(author), query.page.unwrap_or(1))
+}
+
+/// One series, in reading order.
+#[actix_web::get("{lib}/series/{id}")]
+async fn books_in_series(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, series) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Series(series), query.page.unwrap_or(1))
+}
+
+#[actix_web::get("{lib}/publishers/{id}")]
+async fn books_by_publisher(
+    data: web::Data<AppState>,
+    path: web::Path<(String, i32)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, publisher) = path.into_inner();
+    books_feed(&data, &req, &lib, Shelf::Publisher(publisher), query.page.unwrap_or(1))
+}
+
+/// What the OpenSearch description points at. `query` rather than `q`
+#[actix_web::get("{lib}/search")]
+async fn search(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    asked: web::Query<SearchQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    let term = asked.query.clone().unwrap_or_default();
+    books_feed(&data, &req, &lib, Shelf::Search(term), asked.page.unwrap_or(1))
+}
+
+/// The newest arrivals, in the order they arrived. A window on the library
+/// rather than a shelf of it, so it is not paged and carries no page links.
 #[actix_web::get("{lib}/new")]
 async fn recently_added(
     data: web::Data<AppState>,
@@ -356,9 +528,9 @@ async fn recently_added(
     req: HttpRequest,
 ) -> impl Responder {
     let lib = path.into_inner();
-    let db = match data.db.get(&lib) {
-        Some(db) => calibre::lock(db),
-        None => return HttpResponse::NotFound().body(format!("Database '{}' not found", lib)),
+    let db = match library(&data, &lib) {
+        Ok(db) => db,
+        Err(response) => return response,
     };
 
     let books = match calibre::recently_added(&db) {
@@ -366,7 +538,7 @@ async fn recently_added(
         Err(e) => return server_error("Error querying books", e),
     };
 
-    let mut ctx = feed_ctx(&req, data.config, Some(&lib));
+    let mut ctx = shelf_ctx(&req, data.config, &lib, ACQUISITION);
     ctx.insert("feed_title", &format!("{} | Recently Added", lib));
     ctx.insert("books", &books);
     ctx.insert("updated", &calibre::updated(&db));

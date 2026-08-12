@@ -1,17 +1,14 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
-
   <title>ORCA</title>
-
-  {% for lib in libraries %}
+  {%- for lib in libraries %}
   <entry>
   <title>{{ lib }}</title>
   <id>urn:orca:{{ lib }}</id>
-  <link href="/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
+  <link href="{{ base }}/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
   <updated>{{ updated }}</updated>
   <content type="text">{{ lib }}</content>
   </entry>
-  {% endfor %}
+  {%- endfor %}
 
 {% endblock content %}
-

@@ -1,0 +1,26 @@
+
+[server]
+ip = "127.0.0.1"
+port = 8888
+protocol = "Http"
+
+[authentication]
+# `/library/**` and `/library` mean the same thing
+# the trailing `/**` is deprecated but still valid
+public = ["/", "/library/**", "/v2/json"]
+
+[authentication.login]
+alice = "$argon2id$v=19$m=19456,t=2,p=1$G57mIrlohNqdISyznvXyhw$qNaLVhDp+FJfK38DfJKQOORVG9Mpp00I6EqWz6lsrnQ"
+
+[calibre.libraries.library]
+path = "tests/calibre"
+
+[calibre.libraries.library2]
+path = "tests/calibre"
+
+# Public as JSON only
+[calibre.libraries.json]
+path = "tests/calibre"
+
+[calibre.libraries.private]
+path = "tests/calibre"

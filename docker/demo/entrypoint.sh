@@ -8,7 +8,8 @@ set -e
 banner() {
     printf '\n  Orca %s demo\n' "$ORCA_VERSION"
     printf '  7 public-domain books, in three languages, as EPUB, MOBI and AZW3\n\n'
-    printf '    http://127.0.0.1:23117\n'
+    printf '    http://127.0.0.1:23117/v1   (OPDS 1.2)\n'
+    printf '    http://127.0.0.1:23117/v2   (OPDS 2.0)\n'
     printf '    authentication: %s\n\n' "$1"
 }
 

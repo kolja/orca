@@ -159,17 +159,23 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
 /// The catalog root: one navigation entry per library,
 /// or a redirect when there is only one
 #[actix_web::get("/v2")]
-async fn catalog(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest) -> impl Responder {
-    let mut libraries: Vec<&String> = data.db.keys().collect();
+async fn catalog(data: web::Data<AppState>, auth: Authorized, req: HttpRequest) -> impl Responder {
+    // Only what this client could open
+    let mut libraries: Vec<&String> = data
+        .db
+        .keys()
+        .filter(|lib| auth.may_reach(data.config, &format!("/v2/{}", lib)))
+        .collect();
     libraries.sort();
+
+    let base = origin(&req, data.config);
 
     if let [only] = libraries[..] {
         return HttpResponse::Found()
-            .append_header(("Location", format!("/v2/{}", only)))
+            .append_header(("Location", root_of(&base, only)))
             .finish();
     }
 
-    let base = origin(&req, data.config);
     // The whole catalog is as new as its newest library.
     let updated = data
         .db

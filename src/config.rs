@@ -1,17 +1,19 @@
 
 use dirs::home_dir;
 use std::{env, fmt, fs, collections::HashMap};
-// use regex::Regex;
 use serde_derive::{Deserialize, Serialize};
-use crate::pattern::Pattern;
+use crate::public::Rule;
 
 use once_cell::sync::Lazy;
 use anyhow::{Context, Error, Result, anyhow};
 
 #[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub server: Server,
-    pub authentication: Authentication,
+    /// authentication means: everything is public
+    #[serde(default)]
+    pub authentication: Option<Authentication>,
     pub calibre: Calibre,
     #[serde(default)]
     pub catalog: Catalog,
@@ -22,6 +24,14 @@ impl Config {
         lib.and_then(|lib| self.calibre.libraries.get(lib))
             .and_then(|lib| lib.author.as_deref())
             .unwrap_or(&self.catalog.author)
+    }
+
+    /// libraries that are exempt from requiring credentials.
+    pub fn public(&self) -> &[Rule] {
+        match &self.authentication {
+            Some(auth) => &auth.public,
+            None => &[],
+        }
     }
 }
 
@@ -48,11 +58,16 @@ pub struct Server {
     pub protocol: Protocol,
 }
 
+/// Either may be empty:
+/// logins are present, but nothing is public -> authentication is obligatory for everything
+/// no logins but some libraries are public -> serve only the public libraries.
+/// but: no logins AND no public libraries -> error: there's nothing to serve
 #[derive(Serialize, Deserialize, Default)]
 pub struct Authentication {
+    #[serde(default)]
     pub login: HashMap<String, String>,
     #[serde(default)]
-    pub public: Vec<Pattern>,
+    pub public: Vec<Rule>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -304,6 +319,15 @@ mod tests {
         Some(file.path().to_str().unwrap().to_string())
     }
 
+    /// `unwrap_err` is unavailable here: it wants `Config: Debug`, which would
+    /// drag a Debug bound through every type a config holds for no benefit.
+    fn refusal(file: &NamedTempFile, why: &str) -> String {
+        match read_config(file.path().to_str().unwrap()) {
+            Ok(_) => panic!("{}", why),
+            Err(err) => err.to_string(),
+        }
+    }
+
     const VALID: &str = r#"
         [server]
         ip = "127.0.0.1"
@@ -333,6 +357,40 @@ mod tests {
 
         assert!(err.contains("expected struct Library"), "{}", err);
         assert!(err.contains(broken.path().to_str().unwrap()), "{}", err);
+    }
+
+    // omitting the auth section means: no authentication required (see for example the demo image)
+    #[test]
+    fn a_config_without_an_authentication_section_parses() {
+        let open = config_file(&VALID.replace(
+            "[authentication.login]\n        alice = \"...passwordhash...\"",
+            "",
+        ));
+
+        let config = read_config(open.path().to_str().unwrap()).unwrap();
+        assert!(config.authentication.is_none());
+        assert!(config.public().is_empty());
+    }
+
+    // if authentication was misspelled that would make the entire server public by accident.
+    // thats why unknown keys can not be allowed in the config.
+    #[test]
+    fn a_misspelled_section_refuses_to_parse() {
+        let typo = config_file(&VALID.replace("[authentication.login]", "[authentcation.login]"));
+
+        let err = refusal(&typo, "a misspelled section must not open the server");
+        assert!(err.contains("unknown field `authentcation`"), "{}", err);
+    }
+
+    // An entry in the public array must name a library
+    #[test]
+    fn a_public_entry_that_names_no_library_refuses_to_parse() {
+        for entry in [r#""/**""#, r#""/*/cover/*""#, r#""/library/tags""#] {
+            let broken = config_file(&format!("{}\n[authentication]\npublic = [{}]\n", VALID, entry));
+
+            let err = refusal(&broken, "an entry naming no library must not parse");
+            assert!(err.contains("public = "), "{}: {}", entry, err);
+        }
     }
 
     #[test]
@@ -369,7 +427,7 @@ mod tests {
         bob = "...relativelylonghash..."
 
         [authentication]
-        public = ["/", "/library/*"]
+        public = ["/", "/library"]
 
         [calibre]
         libraries = {}

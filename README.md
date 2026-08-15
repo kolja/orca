@@ -26,7 +26,7 @@ seven public-domain books, in three languages, as EPUB, MOBI and AZW3:
 docker run --rm --pull=always -p 23117:23117 koljaw/orca-demo
 ```
 Add `--auth` at the end to serve the same library behind a login (`alice` / `secretpassword`)
-then point an OPDS reader at `http://127.0.0.1:23117` or `http://127.0.0.1:23117/v2` for an OPDS v2 feed.
+then point an OPDS reader at `http://127.0.0.1:23117/v1` (or `http://127.0.0.1:23117/v2` for OPDS v2)
 
 ## Installation
 
@@ -64,7 +64,7 @@ alice = "$argon2id$v=19$m=19456,t=2,p=1$bK0qYfzAokhthFP0fKBQvg$QPPf54SN74dT2YX4a
 bob = "$argon2id$v=19$m=19456,t=2,p=1$FMnONzRzIAkaIuy3c+A9cg$DE3+UC62d/f+L0jqEWgz9GAfNWQkKfugeZFSL/FG5XQ"
 
 [authentication]
-public = ["/", "/library/**"] # the root endpoint is publicly accessible, so is everything under /library
+public = ["/", "/library"] # the catalog and the whole `library` need no login
 
 [catalog]
 author = "Jorge Luis Borges" # optional (default: "orca")
@@ -84,7 +84,17 @@ orca --hash <login>:<password> # e.g. orca --hash alice:secretpassword
 ```
 The server will print the hash which you have to copy to the `[authentication.login]` section of your config file.
 
-Under the `public` array in the `[authentication]` section you can specify which paths should be accessible without authentication. You can use wildcards like `*` and `**` to match multiple paths.
+Omit the `[authentication]` section if you want everything to be public (orca will not ask for credetials).
+
+With the section present, all libraries require authentication except for those listed in the `public` array.
+
+| entry | opens |
+| --- | --- |
+| `/` | the catalog — the list of libraries |
+| `/library` | library in both formats (OPDS v1 and v2) |
+| `/v1/library` | Atom only (`/v2/library` for JSON) |
+
+A catalog lists only the libraries the caller can actually open, so a client that logs in may see more than a guest does. Note that making a library public does not by itself make it discoverable: name `/` too, or point clients straight at `/v1/library`.
 
 ## Who publishes the catalog
 

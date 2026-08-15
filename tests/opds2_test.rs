@@ -6,12 +6,12 @@
 use actix_http::Request;
 use actix_web::dev::{Service, ServiceResponse};
 use actix_web::http::{header, StatusCode};
-use actix_web::{test, web, App};
+use actix_web::test;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use boon::{Compiler, Schemas};
 use once_cell::sync::Lazy;
 use orca::config::{read_config, Config};
-use orca::{create_app, init};
+use orca::create_app;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,7 +36,10 @@ async fn a_single_library_needs_no_catalog() {
     let response = call_authorized(&app, "/v2").await;
 
     assert_eq!(response.status(), StatusCode::FOUND);
-    assert_eq!(response.headers().get(header::LOCATION).unwrap(), "/v2/library");
+    assert_eq!(
+        response.headers().get(header::LOCATION).unwrap(),
+        "http://localhost:8080/v2/library"
+    );
 }
 
 #[test]
@@ -654,17 +657,32 @@ async fn the_schema_check_has_teeth() {
     assert!(validate(&document, AUTHENTICATION).is_err());
 }
 
-// ------- OPDS 1.2 is untouched -------
+// ------- The two feeds, side by side -------
 
-// `/v2` is registered before `/{lib}`, which would otherwise swallow it.
+// Both versions are registered before the `/{lib}` alias, which matches anything
+// at all -- including `v1` and `v2`.
 #[test]
-async fn the_atom_catalog_still_answers() {
+async fn each_version_answers_under_its_own_prefix() {
     let app = setup(&TEST_HTTP_CONFIG).await;
-    let response = call_authorized(&app, "/library/books").await;
 
+    let atom = call_authorized(&app, "/v1/library/books").await;
     assert_eq!(
-        response.headers().get(header::CONTENT_TYPE).unwrap(),
+        atom.headers().get(header::CONTENT_TYPE).unwrap(),
         "application/atom+xml"
+    );
+
+    let json = call_authorized(&app, "/v2/library/books").await;
+    assert_eq!(
+        json.headers().get(header::CONTENT_TYPE).unwrap(),
+        "application/opds+json"
+    );
+
+    // the bare path, where OPDS 1.2 used to live, redirects leads to `/v1`
+    let bare = call_authorized(&app, "/library/books").await;
+    assert_eq!(bare.status(), StatusCode::FOUND);
+    assert_eq!(
+        bare.headers().get(header::LOCATION).unwrap(),
+        "http://localhost:8080/v1/library/books"
     );
 }
 
@@ -674,7 +692,7 @@ async fn setup(
     config: &'static Config,
 ) -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
     let state = create_app(config).expect("Failed to create app");
-    test::init_service(App::new().app_data(web::Data::new(state)).configure(init)).await
+    test::init_service(orca::app(state)).await
 }
 
 async fn call(

@@ -11,8 +11,11 @@ pub mod opds2;
 pub mod routes;
 pub mod routes_v2;
 pub mod shelf;
-pub mod pattern;
+pub mod public;
 
+use actix_web::body::BoxBody;
+use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
+use actix_web::middleware::NormalizePath;
 use actix_web::{web, App, HttpServer};
 use anyhow::{anyhow, Result};
 use rusqlite::Connection;
@@ -23,7 +26,7 @@ use tera::{Kwargs, State, Tera};
 
 use config::{Config, Protocol};
 use templates::Template;
-use routes::{health, all_series, authentication, authors, book_file, books_by_author, books_by_publisher, books_by_tag, books_in_series, cover, getbooks, index, logo, opds, opensearch, publishers, recently_added, search, tags};
+use routes::{health, all_series, authentication, authors, book_file, books_by_author, books_by_publisher, books_by_tag, books_in_series, cover, catalog_moved, feed_moved, getbooks, index, library_moved, logo, opds, opensearch, publishers, recently_added, search, tags};
 use appstate::AppState;
 
 // Tera filter to convert format to mime type -- OPDS v2 links can use it too.
@@ -52,7 +55,41 @@ fn open_library(library: &str, path: &str) -> Result<Connection> {
 }
 
 /// Path segments reserved to orca. Can't serve a library under these.
-const RESERVED: [&str; 3] = ["v2", "health", "auth"];
+pub(crate) const RESERVED: [&str; 4] = ["v1", "v2", "health", "auth"];
+
+fn check_authentication(config: &Config) -> Result<()> {
+    let Some(auth) = &config.authentication else {
+        println!("No [authentication] section: serving every library without authentication");
+        return Ok(());
+    };
+
+    if auth.login.is_empty() && auth.public.is_empty() {
+        return Err(anyhow!(
+            "[authentication] has no logins and names nothing public: no request could be \
+             served. Remove the section from your config if you don't want authentication."
+        ));
+    }
+
+    for rule in &auth.public {
+        match rule.library() {
+            Some(library) if !config.calibre.libraries.contains_key(library) => {
+                return Err(anyhow!(
+                    "[authentication] public names '{}', which is not a configured library",
+                    library
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    if auth.login.is_empty() {
+        eprintln!(
+            "Warning: no logins configured. Everything outside `public` will refuse every request."
+        );
+    }
+
+    Ok(())
+}
 
 pub fn create_app(config: &'static Config) -> Result<AppState> {
 
@@ -64,6 +101,8 @@ pub fn create_app(config: &'static Config) -> Result<AppState> {
     if let Some(library) = config.calibre.libraries.keys().find(|name| RESERVED.contains(&name.as_str())) {
         return Err(anyhow!("library '{}': the name is reserved by Orca itself", library));
     }
+
+    check_authentication(config)?;
 
     // Every configured library has to open
     let mut db_map: HashMap<String, Arc<Mutex<Connection>>> = HashMap::new();
@@ -100,6 +139,25 @@ pub fn create_app(config: &'static Config) -> Result<AppState> {
     })
 }
 
+/// `NormalizePath::trim` rewrites the path before anything else sees it
+///  `authorized.rs` reads the path after normalisation
+pub fn app(
+    state: AppState,
+) -> App<
+    impl ServiceFactory<
+        ServiceRequest,
+        Config = (),
+        Response = ServiceResponse<BoxBody>,
+        Error = actix_web::Error,
+        InitError = (),
+    >,
+> {
+    App::new()
+        .wrap(NormalizePath::trim())
+        .app_data(web::Data::new(state))
+        .configure(init)
+}
+
 pub async fn run_server(state: AppState) -> std::io::Result<()> {
     let ip = state.config.server.ip.clone();
     let port = state.config.server.port;
@@ -109,11 +167,7 @@ pub async fn run_server(state: AppState) -> std::io::Result<()> {
         Protocol::Http => {
             println!("Starting HTTP server on {ip}:{port}");
 
-            HttpServer::new(move || {
-                App::new()
-                    .app_data(web::Data::new(state.clone()))
-                    .configure(init)
-            })
+            HttpServer::new(move || app(state.clone()))
             .bind((ip, port))?
             .run()
             .await
@@ -126,11 +180,7 @@ pub async fn run_server(state: AppState) -> std::io::Result<()> {
                 std::process::exit(1);
             });
 
-            HttpServer::new(move || {
-                App::new()
-                    .app_data(web::Data::new(state.clone()))
-                    .configure(init)
-            })
+            HttpServer::new(move || app(state.clone()))
             .bind_rustls_0_23((ip, port), config)?
             .run()
             .await
@@ -160,6 +210,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(routes_v2::books_by_publisher);
     cfg.service(routes_v2::search);
 
+    // The OPDS 1.2 feeds under `/v1`, JSON is under `/v2`.
     cfg.service(index);
     cfg.service(opds);
     cfg.service(opensearch);
@@ -170,12 +221,20 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(publishers);
     cfg.service(getbooks);
     cfg.service(recently_added);
-    cfg.service(book_file);
-    cfg.service(cover);
     cfg.service(books_by_tag);
     cfg.service(books_by_author);
     cfg.service(books_in_series);
     cfg.service(books_by_publisher);
+
+    // Bytes rather than OPDS, and version-neutral: both feeds link here.
+    // Before the aliases below, which would otherwise redirect every cover.
+    cfg.service(book_file);
+    cfg.service(cover);
+
+    // Last, because `{lib}` matches anything at all -- including `v1` and `v2`.
+    cfg.service(catalog_moved);
+    cfg.service(library_moved);
+    cfg.service(feed_moved);
 }
 
 #[cfg(test)]
@@ -188,6 +247,13 @@ mod tests {
     // `create_app` takes a `&'static Config`; leaking one per test is cheap and
     // keeps these tests independent of any config file on disk.
     fn config_for(libraries: &[(&str, &str)]) -> &'static Config {
+        authenticated_config_for(libraries, None)
+    }
+
+    fn authenticated_config_for(
+        libraries: &[(&str, &str)],
+        authentication: Option<Authentication>,
+    ) -> &'static Config {
         Box::leak(Box::new(Config {
             server: Server {
                 ip: "127.0.0.1".to_string(),
@@ -195,7 +261,7 @@ mod tests {
                 public_url: None,
                 protocol: Protocol::Http,
             },
-            authentication: Authentication::default(),
+            authentication,
             calibre: Calibre {
                 libraries: libraries
                     .iter()
@@ -234,7 +300,7 @@ mod tests {
         assert!(err.contains("no Calibre database at 'tests/calibr/metadata.db'"), "{}", err);
     }
 
-    // The reason `open_library` checks before opening: SQLite would create the missing file, 
+    // The reason `open_library` checks before opening: SQLite would create the missing file,
     // turning a config typo into a 500 on every request instead of an error at startup.
     #[test]
     fn a_mistyped_path_does_not_create_a_database() {
@@ -276,6 +342,48 @@ mod tests {
             );
             assert!(err.contains(&format!("library '{}': the name is reserved", name)), "{}", err);
         }
+    }
+
+    fn authentication(logins: &[&str], public: &[&str]) -> Authentication {
+        Authentication {
+            login: logins.iter().map(|n| (n.to_string(), "hash".to_string())).collect(),
+            public: public.iter().map(|p| public::Rule::new(p).unwrap()).collect(),
+        }
+    }
+
+    // No credentials to check and nothing named public: every route would refuse every request
+    #[test]
+    fn an_empty_authentication_section_refuses_to_start() {
+        let err = refusal(
+            create_app(authenticated_config_for(
+                &[("library", "tests/calibre")],
+                Some(authentication(&[], &[])),
+            )),
+            "a server that can serve nobody must not start",
+        );
+        assert!(err.contains("no logins and names nothing public"), "{}", err);
+    }
+
+    #[test]
+    fn a_public_entry_naming_no_configured_library_refuses_to_start() {
+        let err = refusal(
+            create_app(authenticated_config_for(
+                &[("library", "tests/calibre")],
+                Some(authentication(&["alice"], &["/libary"])),
+            )),
+            "a public entry naming an unknown library must not start a server",
+        );
+        assert!(err.contains("'libary', which is not a configured library"), "{}", err);
+    }
+
+    // It's ok to forgo authentication, if some libraries are listed as public
+    #[test]
+    fn public_libraries_without_logins_start() {
+        assert!(create_app(authenticated_config_for(
+            &[("library", "tests/calibre")],
+            Some(authentication(&[], &["/library"])),
+        ))
+        .is_ok());
     }
 
     #[test]

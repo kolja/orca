@@ -19,10 +19,10 @@
     <link href="{{ base }}/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
     <link href="{{ base }}/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
     {%- if book.series %}
-    <link href="{{ base }}/{{ lib }}/series/{{ book.series.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" rel="related" title="{{ book.series.name }}"/>
+    <link href="{{ catalog }}/{{ lib }}/series/{{ book.series.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" rel="related" title="{{ book.series.name }}"/>
     {%- endif %}
     {%- if book.publisher %}
-    <link href="{{ base }}/{{ lib }}/publishers/{{ book.publisher.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" rel="related" title="{{ book.publisher.name }}"/>
+    <link href="{{ catalog }}/{{ lib }}/publishers/{{ book.publisher.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition" rel="related" title="{{ book.publisher.name }}"/>
     {%- endif %}
     {%- for format in book.formats %}
     <link href="{{ base }}/{{ lib }}/file/{{ book.id }}/{{ format.name }}" type="{{ format.name | format_to_mime }}" rel="http://opds-spec.org/acquisition" title="{{ book.title }}.{{ format.name }}" length="{{ format.size }}"/>
@@ -33,7 +33,7 @@
     {%- for author in book.authors %}
     <author>
       <name>{{ author.name }}</name>
-      <uri>{{ base }}/{{ lib }}/authors/{{ author.id }}</uri>
+      <uri>{{ catalog }}/{{ lib }}/authors/{{ author.id }}</uri>
     </author>
     {%- endfor %}
     <published>{{ book.pubdate }}</published>

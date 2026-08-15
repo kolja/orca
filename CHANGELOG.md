@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.2
+
+`/` now redirects to `/v1` (also a reserved route now) for the Atom feed.
+Covers and downloads remain unversioned under `/{lib}/cover/{id}` and `/{lib}/file/{id}/{format}`
+Trailing or a doubled slashes are normalized.
+
+*public = []* in the config:
+
+A `public` entry names a library rather than a URL, and globs are gone (but trailing `/**` is still legal).
+`/library` makes both formats public, `/v1/library` or `/v2/library` only the version specified.
+
+Leaving out `[authentication]` altogether serves every library without a login.
+`[authentication]` present but empty is an error, so is an unknown key anywhere in the config.
+
+`/health` needs no credentials any more
+The catalog lists only the libraries the caller can open.
+
 ## 0.2.1
 
 - added a one-line orca demo

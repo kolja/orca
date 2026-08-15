@@ -6,7 +6,7 @@
   <entry>
     <title>{{ entry.name }}</title>
     <id>urn:orca:{{ lib }}:{{ noun }}:{{ entry.id }}</id>
-    <link href="{{ base }}/{{ lib }}/{{ shelf }}/{{ entry.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+    <link href="{{ catalog }}/{{ lib }}/{{ shelf }}/{{ entry.id }}" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
     <updated>{{ updated }}</updated>
     <content type="text">{{ entry.books }} book{% if entry.books != 1 %}s{% endif %}</content>
   </entry>

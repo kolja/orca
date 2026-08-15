@@ -10,6 +10,7 @@ use crate::hash;
 use crate::authdoc;
 use crate::config::Config;
 use crate::appstate::AppState;
+use crate::public;
 use crate::routes::origin;
 use serde_derive::{Deserialize, Serialize};
 use std::fmt::{Debug, Display};
@@ -39,9 +40,19 @@ impl ResponseError for UnauthorizedError {
     }
 }
 
+pub const GUEST: &str = "Guest";
+
 #[derive(Serialize, Deserialize)]
 pub struct Authorized {
     pub login: String,
+    limited: bool, // a request sees only what is listed in `public`
+}
+
+impl Authorized {
+    /// The catalog uses this to list the libraries a client can actually open
+    pub fn may_reach(&self, config: &Config, path: &str) -> bool {
+        !self.limited || public::allows(config.public(), path)
+    }
 }
 
 fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorized> {
@@ -51,10 +62,11 @@ fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorize
                .and_then(|vec| String::from_utf8(vec).ok())
                .and_then(|loginpassword| {
                    let (login, password) = loginpassword.split_once(":")?;
-                   let hash = config.authentication.login.get(login)?;
+                   let hash = config.authentication.as_ref()?.login.get(login)?;
                    match hash::verify_password(password, hash).ok()? {
                        true => Some(Authorized {
                             login: login.to_string(),
+                            limited: false,
                        }),
                        false => None,
                    }
@@ -70,25 +82,25 @@ impl FromRequest for Authorized {
         let config = &data.config;
         let path = req.uri().path();
 
+        // `[authentication]` section: everything is public
+        if config.authentication.is_none() {
+            return ready(Ok(Authorized { login: GUEST.to_string(), limited: false }));
+        }
+
         let result = req.headers().get(header::AUTHORIZATION)
                                   .and_then(|header| verify_credentials(header, config));
 
         match result {
             Some(auth) => ready(Ok(auth)),
+            None if public::allows(config.public(), path) => ready(Ok(Authorized {
+                login: GUEST.to_string(),
+                limited: true,
+            })),
             None => {
-                let public_routes = &config.authentication.public;
-                let is_public = public_routes.iter().any(|pat| pat.is_match(path));
-
-                if is_public {
-                    ready(Ok(Authorized {
-                        login: "Guest".to_string(),
-                    }))
-                } else {
-                    let error = UnauthorizedError {
-                        document: authdoc::body(&origin(req, config)),
-                    };
-                    ready(Err(error.into()))
-                }
+                let error = UnauthorizedError {
+                    document: authdoc::body(&origin(req, config)),
+                };
+                ready(Err(error.into()))
             }
         }
     }

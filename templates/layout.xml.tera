@@ -5,12 +5,12 @@
   <id>{{ feed_id }}</id>
   <updated>{{ updated }}</updated>
   <link rel="self" href="{{ self_url }}" type="application/atom+xml;profile=opds-catalog;kind={{ kind }}" />
-  <link rel="start" href="{{ base }}/" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
+  <link rel="start" href="{{ catalog }}" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
   {%- if up %}
-  <link rel="up" href="{{ base }}/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
+  <link rel="up" href="{{ catalog }}/{{ lib }}" type="application/atom+xml;profile=opds-catalog;kind=navigation" />
   {%- endif %}
   {%- if lib %}
-  <link rel="search" href="{{ base }}/{{ lib }}/opensearch.xml" type="application/opensearchdescription+xml" title="Search {{ lib }}" />
+  <link rel="search" href="{{ catalog }}/{{ lib }}/opensearch.xml" type="application/opensearchdescription+xml" title="Search {{ lib }}" />
   {%- endif %}
   {%- if paging %}
   <opensearch:totalResults>{{ paging.total }}</opensearch:totalResults>

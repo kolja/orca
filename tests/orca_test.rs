@@ -1,47 +1,40 @@
-use actix_web::{test, App, web};
+use actix_web::test;
 use actix_web::http::{header, StatusCode};
 use actix_web::dev::{Service, ServiceResponse};
 use actix_http::Request;
-use orca::{create_app, init};
+use orca::create_app;
 use orca::config::{Config, read_config};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use quick_xml::{events::Event, reader::Reader};
 use once_cell::sync::Lazy;
 
-enum Protocol {
-    Http,
-    Https,
-}
-use Protocol::{Http, Https};
-
 /// the feeds carry no relative links
 const BASE: &str = "http://localhost:8080";
 
-static TEST_HTTP_CONFIG: Lazy<Config> = Lazy::new(|| {
+static ONE_LIBRARY: Lazy<Config> = Lazy::new(|| {
     read_config("tests/orca.http.test.toml").expect("Failed to read test config")
 });
 
-static TEST_HTTPS_CONFIG: Lazy<Config> = Lazy::new(|| {
+/// The second one overrides `catalog.author`
+static TWO_LIBRARIES: Lazy<Config> = Lazy::new(|| {
     read_config("tests/orca.https.test.toml").expect("Failed to read test config")
 });
 
-async fn setup(protocol: Protocol) -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
-    let state = match protocol {
-        Http => create_app(&TEST_HTTP_CONFIG),
-        Https => create_app(&TEST_HTTPS_CONFIG),
-    }.expect("Failed to create app");
-    test::init_service(
-            App::new()
-                .app_data(web::Data::new(state))
-                .configure(init)
-          ).await
+/// Four libraries: one public, one public as JSON only, and two authenticated ones
+static PARTLY_PUBLIC: Lazy<Config> = Lazy::new(|| {
+    read_config("tests/orca.public.test.toml").expect("Failed to read test config")
+});
+
+async fn setup(config: &'static Config) -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
+    let state = create_app(config).expect("Failed to create app");
+    test::init_service(orca::app(state)).await
 }
 
-// ------- Http Tests -------
+// ------- One library, all of it behind a login -------
 
 #[test]
 async fn health() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let req = test::TestRequest::with_uri("/health").to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
@@ -49,8 +42,8 @@ async fn health() {
 
 #[test]
 async fn unauthorized_request() {
-    let app = setup(Http).await;
-    let req = test::TestRequest::with_uri("/library")
+    let app = setup(&ONE_LIBRARY).await;
+    let req = test::TestRequest::with_uri("/v1/library")
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -58,9 +51,9 @@ async fn unauthorized_request() {
 
 #[test]
 async fn authorized_request() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library")
+    let req = test::TestRequest::with_uri("/v1/library")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -74,9 +67,9 @@ async fn authorized_request() {
 
 #[test]
 async fn list_books() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/books")
+    let req = test::TestRequest::with_uri("/v1/library/books")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -91,9 +84,9 @@ async fn list_books() {
 // Atom requires <id> to be an IRI, so a bare Calibre row id won't cut it
 #[test]
 async fn book_ids_are_uuid_urns() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/books")
+    let req = test::TestRequest::with_uri("/v1/library/books")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -110,21 +103,21 @@ async fn book_ids_are_uuid_urns() {
 // path rather than the full URL
 #[test]
 async fn each_feed_carries_its_own_id() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     for (path, expected) in [
-        ("/library", "<id>urn:orca:library</id>"),
-        ("/library/books", "<id>urn:orca:library:books</id>"),
-        ("/library/authors", "<id>urn:orca:library:authors</id>"),
-        ("/library/tags", "<id>urn:orca:library:tags</id>"),
-        ("/library/series", "<id>urn:orca:library:series</id>"),
-        ("/library/publishers", "<id>urn:orca:library:publishers</id>"),
-        ("/library/authors/5", "<id>urn:orca:library:authors:5</id>"),
-        ("/library/tags/5", "<id>urn:orca:library:tags:5</id>"),
-        ("/library/series/1", "<id>urn:orca:library:series:1</id>"),
-        ("/library/publishers/4", "<id>urn:orca:library:publishers:4</id>"),
-        ("/library/search?query=alice", "<id>urn:orca:library:search</id>"),
+        ("/v1/library", "<id>urn:orca:library</id>"),
+        ("/v1/library/books", "<id>urn:orca:library:books</id>"),
+        ("/v1/library/authors", "<id>urn:orca:library:authors</id>"),
+        ("/v1/library/tags", "<id>urn:orca:library:tags</id>"),
+        ("/v1/library/series", "<id>urn:orca:library:series</id>"),
+        ("/v1/library/publishers", "<id>urn:orca:library:publishers</id>"),
+        ("/v1/library/authors/5", "<id>urn:orca:library:authors:5</id>"),
+        ("/v1/library/tags/5", "<id>urn:orca:library:tags:5</id>"),
+        ("/v1/library/series/1", "<id>urn:orca:library:series:1</id>"),
+        ("/v1/library/publishers/4", "<id>urn:orca:library:publishers:4</id>"),
+        ("/v1/library/search?query=alice", "<id>urn:orca:library:search</id>"),
     ] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -139,20 +132,20 @@ async fn each_feed_carries_its_own_id() {
 
 #[test]
 async fn entries_are_identified_by_what_they_refer_to() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     for (path, expected) in [
-        ("/library", "<id>urn:orca:library:authors</id>"),
-        ("/library", "<id>urn:orca:library:tags</id>"),
-        ("/library", "<id>urn:orca:library:books</id>"),
-        ("/library", "<id>urn:orca:library:series</id>"),
-        ("/library", "<id>urn:orca:library:publishers</id>"),
-        ("/library/authors", "<id>urn:orca:library:author:5</id>"),
-        ("/library/tags", "<id>urn:orca:library:tag:5</id>"),
-        ("/library/publishers", "<id>urn:orca:library:publisher:4</id>"),
+        ("/v1/library", "<id>urn:orca:library:authors</id>"),
+        ("/v1/library", "<id>urn:orca:library:tags</id>"),
+        ("/v1/library", "<id>urn:orca:library:books</id>"),
+        ("/v1/library", "<id>urn:orca:library:series</id>"),
+        ("/v1/library", "<id>urn:orca:library:publishers</id>"),
+        ("/v1/library/authors", "<id>urn:orca:library:author:5</id>"),
+        ("/v1/library/tags", "<id>urn:orca:library:tag:5</id>"),
+        ("/v1/library/publishers", "<id>urn:orca:library:publisher:4</id>"),
         // The one category whose singular is its plural.
-        ("/library/series", "<id>urn:orca:library:series:1</id>"),
+        ("/v1/library/series", "<id>urn:orca:library:series:1</id>"),
     ] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -169,9 +162,9 @@ async fn entries_are_identified_by_what_they_refer_to() {
 // The self link tracks the deployment; the id must not.
 #[test]
 async fn feed_ids_ignore_the_deployment() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/books")
+    let req = test::TestRequest::with_uri("/v1/library/books")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .insert_header(("X-Forwarded-Proto", "https"))
         .insert_header(("X-Forwarded-Host", "books.example.com"))
@@ -180,16 +173,16 @@ async fn feed_ids_ignore_the_deployment() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert!(content.contains("https://books.example.com/library/books"));
+    assert!(content.contains("https://books.example.com/v1/library/books"));
     assert!(content.contains("<id>urn:orca:library:books</id>"));
 }
 
 // Newest first, by the date the book entered the library.
 #[test]
 async fn recently_added_lists_the_newest_arrivals_first() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/new")
+    let req = test::TestRequest::with_uri("/v1/library/new")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -216,16 +209,16 @@ async fn recently_added_lists_the_newest_arrivals_first() {
 // navigation feed. Clients use `kind` to decide which of the two to render.
 #[test]
 async fn feeds_of_books_are_advertised_as_acquisition_feeds() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     for (path, href) in [
-        ("/library", "/library/books"),
-        ("/library", "/library/new"),
-        ("/library/authors", "/library/authors/5"),
-        ("/library/tags", "/library/tags/5"),
-        ("/library/series", "/library/series/1"),
-        ("/library/publishers", "/library/publishers/4"),
+        ("/v1/library", "/v1/library/books"),
+        ("/v1/library", "/v1/library/new"),
+        ("/v1/library/authors", "/v1/library/authors/5"),
+        ("/v1/library/tags", "/v1/library/tags/5"),
+        ("/v1/library/series", "/v1/library/series/1"),
+        ("/v1/library/publishers", "/v1/library/publishers/4"),
     ] {
         let content = body_of(&app, path, &credentials).await;
 
@@ -240,13 +233,13 @@ async fn feeds_of_books_are_advertised_as_acquisition_feeds() {
     }
 }
 
-// The http config has no [catalog] section at all.
+// This library's config has no [catalog] section at all.
 #[test]
 async fn an_unsigned_catalog_names_no_one() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
+    for path in ["/v1/library", "/v1/library/books", "/v1/library/authors", "/v1/library/tags"] {
         let content = body_of(&app, path, &credentials).await;
         assert!(
             content.contains("<author><name>orca</name></author>"),
@@ -256,19 +249,19 @@ async fn an_unsigned_catalog_names_no_one() {
     }
 }
 
-// The https config sets `catalog.author`, and library2 overrides it.
+// `catalog.author` is set for both, and library2 overrides it.
 #[test]
 async fn a_library_may_name_its_own_author() {
-    let app = setup(Https).await;
+    let app = setup(&TWO_LIBRARIES).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     for (path, expected) in [
-        ("/library", "Jorge Luis Borges"),
-        ("/library/books", "Jorge Luis Borges"),
-        ("/library2", "Isaac Newton"),
-        ("/library2/books", "Isaac Newton"),
-        // The index spans libraries, so it can only use the catalog default.
-        ("/", "Jorge Luis Borges"),
+        ("/v1/library", "Jorge Luis Borges"),
+        ("/v1/library/books", "Jorge Luis Borges"),
+        ("/v1/library2", "Isaac Newton"),
+        ("/v1/library2/books", "Isaac Newton"),
+        // The catalog spans libraries, so it can only use the catalog default.
+        ("/v1", "Jorge Luis Borges"),
     ] {
         let content = body_of(&app, path, &credentials).await;
         assert!(
@@ -283,9 +276,9 @@ async fn a_library_may_name_its_own_author() {
 // <author> is whoever publishes the catalog; the software belongs in <generator>.
 #[test]
 async fn feeds_name_the_software_that_built_them() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library", &credentials).await;
+    let content = body_of(&app, "/v1/library", &credentials).await;
 
     let generator = content
         .split("<generator")
@@ -306,9 +299,9 @@ async fn feeds_name_the_software_that_built_them() {
 // RFC 4287 §3.3: 'T' must separate date and time
 #[test]
 async fn dates_are_rfc3339() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/books")
+    let req = test::TestRequest::with_uri("/v1/library/books")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -331,11 +324,11 @@ async fn dates_are_rfc3339() {
 // The feed is as fresh as the most recently touched book in the library.
 #[test]
 async fn feeds_report_the_latest_change_in_the_library() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     // Galactic Patrol, id 9, is the most recently modified book: 2026-08-03.
-    for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
+    for path in ["/v1/library", "/v1/library/books", "/v1/library/authors", "/v1/library/tags"] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
             .to_request();
@@ -354,10 +347,10 @@ async fn feeds_report_the_latest_change_in_the_library() {
 // Atom requires an <updated> on every entry, not just on the feed.
 #[test]
 async fn every_entry_carries_an_updated() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for path in ["/library", "/library/books", "/library/authors", "/library/tags"] {
+    for path in ["/v1/library", "/v1/library/books", "/v1/library/authors", "/v1/library/tags"] {
         let req = test::TestRequest::with_uri(path)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
             .to_request();
@@ -381,7 +374,8 @@ fn book_feed_context(config: &Config, books: serde_json::Value) -> tera::Context
     context.insert("config", config);
     context.insert("lib", "library");
     context.insert("base", "http://localhost:8888");
-    context.insert("self_url", "http://localhost:8888/library/books");
+    context.insert("catalog", "http://localhost:8888/v1");
+    context.insert("self_url", "http://localhost:8888/v1/library/books");
     context.insert("feed_id", "urn:orca:library:books");
     context.insert("updated", "2026-01-01T00:00:00+00:00");
     context.insert("feed_title", "library | All Books");
@@ -417,7 +411,7 @@ fn a_book(title: &str, formats: serde_json::Value) -> serde_json::Value {
 
 #[test]
 async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
-    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
+    let state = create_app(&ONE_LIBRARY).expect("Failed to create app");
     let context = book_feed_context(
         state.config,
         serde_json::json!([a_book("A Book From The Before Times", serde_json::json!([{"name": "epub", "size": 1}]))]),
@@ -433,7 +427,7 @@ async fn a_book_without_a_uuid_falls_back_to_a_library_scoped_urn() {
 
 #[test]
 async fn book_metadata_is_xml_escaped() {
-    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
+    let state = create_app(&ONE_LIBRARY).expect("Failed to create app");
     let mut book = a_book("Fish & Chips <Special>", serde_json::json!([{"name": "epub", "size": 1}]));
     book["synopsis"] = serde_json::json!("Science fact & science fiction");
     book["authors"] = serde_json::json!([{"id": 1, "name": "A & B"}]);
@@ -460,7 +454,7 @@ async fn book_metadata_is_xml_escaped() {
 // Auto-escaping would otherwise encode the `/` in mime types as `&#x2F;`.
 #[test]
 async fn mime_types_are_not_escaped() {
-    let state = create_app(&TEST_HTTP_CONFIG).expect("Failed to create app");
+    let state = create_app(&ONE_LIBRARY).expect("Failed to create app");
     let mut book = a_book(
         "Fish & Chips",
         serde_json::json!([
@@ -491,9 +485,9 @@ async fn mime_types_are_not_escaped() {
 
 #[test]
 async fn list_authors() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/authors")
+    let req = test::TestRequest::with_uri("/v1/library/authors")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -507,9 +501,9 @@ async fn list_authors() {
 
 #[test]
 async fn list_books_by_immanuel_kant() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/authors/5")
+    let req = test::TestRequest::with_uri("/v1/library/authors/5")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -523,9 +517,9 @@ async fn list_books_by_immanuel_kant() {
 
 #[test]
 async fn list_tags() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/tags")
+    let req = test::TestRequest::with_uri("/v1/library/tags")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -539,9 +533,9 @@ async fn list_tags() {
 
 #[test]
 async fn list_books_tagged_fiction() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/tags/5")
+    let req = test::TestRequest::with_uri("/v1/library/tags/5")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -555,7 +549,7 @@ async fn list_books_tagged_fiction() {
 
 #[test]
 async fn download_cover() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/library/cover/5")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -567,7 +561,7 @@ async fn download_cover() {
 
 #[test]
 async fn download_epub() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/library/file/5/epub")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -579,7 +573,7 @@ async fn download_epub() {
 
 #[test]
 async fn download_mobi() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/library/file/6/mobi")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -594,7 +588,7 @@ async fn download_mobi() {
 // A book id that is not in the database must be a 404.
 #[test]
 async fn missing_ids_return_404_and_leave_the_library_usable() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let auth = || (header::AUTHORIZATION, format!("Basic {}", credentials));
 
@@ -604,7 +598,7 @@ async fn missing_ids_return_404_and_leave_the_library_usable() {
         assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{} should be 404", uri);
     }
 
-    let req = test::TestRequest::with_uri("/library/books").insert_header(auth()).to_request();
+    let req = test::TestRequest::with_uri("/v1/library/books").insert_header(auth()).to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success(), "library unusable after a missing-id request");
 }
@@ -612,11 +606,11 @@ async fn missing_ids_return_404_and_leave_the_library_usable() {
 // An id that names no author and no tag is a 404, the same as under `/v2`.
 #[test]
 async fn a_shelf_that_is_not_there_is_404() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for uri in ["/library/tags/99999", "/library/authors/99999",
-                "/library/series/99999", "/library/publishers/99999"] {
+    for uri in ["/v1/library/tags/99999", "/v1/library/authors/99999",
+                "/v1/library/series/99999", "/v1/library/publishers/99999"] {
         let req = test::TestRequest::with_uri(uri)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
             .to_request();
@@ -628,14 +622,14 @@ async fn a_shelf_that_is_not_there_is_404() {
 // A library that is not configured is a 404
 #[test]
 async fn unknown_library_is_not_found() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for uri in ["/nosuchlib", "/nosuchlib/books", "/nosuchlib/tags",
-                "/nosuchlib/authors", "/nosuchlib/tags/5", "/nosuchlib/authors/5",
-                "/nosuchlib/series", "/nosuchlib/publishers", "/nosuchlib/series/1",
-                "/nosuchlib/publishers/4", "/nosuchlib/search?query=alice",
-                "/nosuchlib/opensearch.xml",
+    for uri in ["/v1/nosuchlib", "/v1/nosuchlib/books", "/v1/nosuchlib/tags",
+                "/v1/nosuchlib/authors", "/v1/nosuchlib/tags/5", "/v1/nosuchlib/authors/5",
+                "/v1/nosuchlib/series", "/v1/nosuchlib/publishers", "/v1/nosuchlib/series/1",
+                "/v1/nosuchlib/publishers/4", "/v1/nosuchlib/search?query=alice",
+                "/v1/nosuchlib/opensearch.xml",
                 "/nosuchlib/cover/5", "/nosuchlib/file/5/epub"] {
         let req = test::TestRequest::with_uri(uri)
             .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -645,20 +639,162 @@ async fn unknown_library_is_not_found() {
     }
 }
 
+// trailing slashes and double slashes are normalized
+#[test]
+async fn a_sloppy_url_is_the_url_it_meant() {
+    let app = setup(&ONE_LIBRARY).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for (sloppy, meant) in [
+        ("/v1/library/", "/v1/library"),
+        ("/v1/library/books/", "/v1/library/books"),
+        ("/v1/library/authors/", "/v1/library/authors"),
+        ("/v1/library/search/?query=alice", "/v1/library/search?query=alice"),
+        ("//v1//library", "/v1/library"),
+        ("/v1/library//books", "/v1/library/books"),
+        ("/v2/library/", "/v2/library"),
+    ] {
+        assert_eq!(
+            body_of(&app, sloppy, &credentials).await,
+            body_of(&app, meant, &credentials).await,
+            "{} should answer as {} does",
+            sloppy,
+            meant
+        );
+    }
+
+    for (sloppy, meant) in [("/v1/", "/v1"), ("/v2/", "/v2")] {
+        assert_eq!(
+            answer_to(&app, sloppy, &credentials).await,
+            answer_to(&app, meant, &credentials).await,
+            "{} should answer as {} does",
+            sloppy,
+            meant
+        );
+    }
+}
+
+#[test]
+async fn a_public_library_is_public_in_both_feeds() {
+    let app = setup(&PARTLY_PUBLIC).await;
+
+    for path in ["/v1/library", "/v1/library/books", "/v1/library/authors/5",
+                 "/v1/library/search?query=alice", "/v2/library", "/v2/library/books",
+                 "/v2/library/book/4", "/library/cover/5", "/library/file/4/epub"] {
+        let req = test::TestRequest::with_uri(path).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success(), "{} should need no credentials", path);
+    }
+
+    // the redirect must point to a public resource (rather than to a 401)
+    for path in ["/library", "/library/books"] {
+        let req = test::TestRequest::with_uri(path).to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), StatusCode::FOUND, "{} should redirect", path);
+
+        let target = resp.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+        let req = test::TestRequest::with_uri(target.trim_start_matches(BASE)).to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "{} leads to a 401", path);
+    }
+}
+
+// A pattern naming a version opens that version's feeds plus the covers and downloads
+#[test]
+async fn a_feed_opens_the_files_it_points_at() {
+    let app = setup(&PARTLY_PUBLIC).await;
+
+    for path in ["/v2/json", "/v2/json/books", "/v2/json/book/4",
+                 "/json/cover/5", "/json/file/4/epub"] {
+        let req = test::TestRequest::with_uri(path).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success(), "{} should need no credentials", path);
+    }
+
+    // The version it does not name still requires authentication
+    for path in ["/v1/json", "/v1/json/books"] {
+        let req = test::TestRequest::with_uri(path).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{} should ask for a login", path);
+    }
+}
+
+// Public is per entry, not per server
+#[test]
+async fn a_library_no_entry_names_stays_private() {
+    let app = setup(&PARTLY_PUBLIC).await;
+
+    for path in ["/v1/private", "/v1/private/books", "/v2/private", "/private/books",
+                 "/private/cover/5", "/private/file/4/epub"] {
+        let req = test::TestRequest::with_uri(path).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{} should ask for a login", path);
+    }
+}
+
+#[test]
+async fn a_library_that_starts_like_a_public_one_is_still_private() {
+    let app = setup(&PARTLY_PUBLIC).await;
+
+    for path in ["/v1/library2", "/v1/library2/books", "/v2/library2", "/v2/library2/books",
+                 "/library2/books", "/library2/cover/5", "/library2/file/4/epub"] {
+        let req = test::TestRequest::with_uri(path).to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{} should ask for a login", path);
+    }
+}
+
+// A catalog lists what the client can open
+#[test]
+async fn a_catalog_lists_only_what_the_caller_can_reach() {
+    let app = setup(&PARTLY_PUBLIC).await;
+
+    // `json` is public as JSON only, so to a guest the Atom catalog holds one
+    // library -- and a catalog with only one entry redirects
+    let req = test::TestRequest::with_uri("/v1").to_request();
+    let resp = test::call_service(&app, req).await;
+    assert_eq!(resp.status(), StatusCode::FOUND);
+    assert_eq!(
+        resp.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
+        format!("{}/v1/library", BASE)
+    );
+
+    // Two under JSON, and neither of the private ones show up
+    let body = body_of(&app, "/v2", "").await;
+    assert!(body.contains(r#""title":"library""#), "{}", body);
+    assert!(body.contains(r#""title":"json""#), "{}", body);
+    assert!(!body.contains("library2"), "{}", body);
+    assert!(!body.contains("private"), "{}", body);
+
+    // Alice sees all four, in both formats.
+    let credentials = BASE64.encode("alice:secretpassword");
+    for uri in ["/v1", "/v2"] {
+        let body = body_of(&app, uri, &credentials).await;
+        for lib in ["library", "library2", "json", "private"] {
+            assert!(body.contains(lib), "{} should list {}\n{}", uri, lib, body);
+        }
+    }
+}
+
 // One acquisition link per format
 #[test]
 async fn each_format_is_offered_exactly_once() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     // Book 6 has two authors and two formats; book 4 has three tags.
-    for uri in ["/library/books", "/library/authors/6", "/library/authors/7"] {
+    for uri in ["/v1/library/books", "/v1/library/authors/6", "/v1/library/authors/7"] {
         let content = body_of(&app, uri, &credentials).await;
         assert_eq!(count_links(&content, "/library/file/6/epub"), 1, "{}", uri);
         assert_eq!(count_links(&content, "/library/file/6/mobi"), 1, "{}", uri);
     }
 
-    for uri in ["/library/books", "/library/authors/4", "/library/tags/5"] {
+    for uri in ["/v1/library/books", "/v1/library/authors/4", "/v1/library/tags/5"] {
         let content = body_of(&app, uri, &credentials).await;
         assert_eq!(count_links(&content, "/library/file/4/epub"), 1, "{}", uri);
     }
@@ -669,10 +805,10 @@ async fn each_format_is_offered_exactly_once() {
 // acquire at all.
 #[test]
 async fn formats_beyond_the_usual_three_are_offered_too() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/books", &credentials).await;
+    let content = body_of(&app, "/v1/library/books", &credentials).await;
     assert_eq!(count_links(&content, "/library/file/4/epub"), 1);
     assert_eq!(count_links(&content, "/library/file/4/azw3"), 1);
     assert!(content.contains(r#"type="application/vnd.amazon.mobi8-ebook""#));
@@ -693,7 +829,7 @@ async fn formats_beyond_the_usual_three_are_offered_too() {
 // was built before anyone checked whether that file existed.
 #[test]
 async fn a_format_the_library_does_not_hold_is_404() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     for uri in ["/library/file/5/pdf", "/library/file/4/mobi"] {
@@ -707,10 +843,10 @@ async fn a_format_the_library_does_not_hold_is_404() {
 
 #[test]
 async fn untagged_books_still_appear_in_author_feeds() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/authors/6", &credentials).await;
+    let content = body_of(&app, "/v1/library/authors/6", &credentials).await;
     assert_eq!(count_items(&content), 1);
     assert!(content.contains("The sidereal messenger of Galileo Galilei"));
 }
@@ -719,15 +855,15 @@ async fn untagged_books_still_appear_in_author_feeds() {
 // author and not an arbitrary single author.
 #[test]
 async fn co_authored_books_list_every_author() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/books", &credentials).await;
+    let content = body_of(&app, "/v1/library/books", &credentials).await;
     assert_eq!(count_items(&content), 7, "the co-authored book must not be duplicated");
     assert!(content.contains("<name>Galileo Galilei</name>"));
     assert!(content.contains("<name>Johannes Kepler</name>"));
     // Author links must point at a route that exists.
-    assert!(content.contains(&format!("<uri>{}/library/authors/6</uri>", BASE)));
+    assert!(content.contains(&format!("<uri>{}/v1/library/authors/6</uri>", BASE)));
     assert!(!content.contains("<uri>/author/"));
 }
 
@@ -736,9 +872,9 @@ async fn co_authored_books_list_every_author() {
 // wildcard bind (0.0.0.0) is not connectable from anywhere.
 #[test]
 async fn self_link_follows_forwarded_headers() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library/tags")
+    let req = test::TestRequest::with_uri("/v1/library/tags")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .insert_header(("X-Forwarded-Proto", "https"))
         .insert_header(("X-Forwarded-Host", "orca.example.com"))
@@ -749,17 +885,17 @@ async fn self_link_follows_forwarded_headers() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert!(content.contains(r#"rel="self" href="https://orca.example.com/library/tags""#));
-    assert!(content.contains(r#"rel="start" href="https://orca.example.com/""#));
+    assert!(content.contains(r#"rel="self" href="https://orca.example.com/v1/library/tags""#));
+    assert!(content.contains(r#"rel="start" href="https://orca.example.com/v1""#));
     assert!(!content.contains("0.0.0.0"));
 }
 
 // Without a proxy the Host header is the only thing the client can reach us by.
 #[test]
 async fn self_link_falls_back_to_host_header() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library")
+    let req = test::TestRequest::with_uri("/v1/library")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .insert_header((header::HOST, "books.local:8888"))
         .to_request();
@@ -769,35 +905,89 @@ async fn self_link_falls_back_to_host_header() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
 
-    assert!(content.contains(r#"rel="self" href="http://books.local:8888/library""#));
+    assert!(content.contains(r#"rel="self" href="http://books.local:8888/v1/library""#));
 }
 
-// With a single library there is nothing to choose from, so the root sends the
-// client straight to it instead of showing a one-entry catalog.
+// Two hops. First `/` -> `/v1`
+// But there is only one library to pick, so `/v1` -> `/v1/library`
 #[test]
-async fn single_library_redirects_to_it() {
-    let app = setup(Http).await;
+async fn the_root_leads_to_the_only_library() {
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/")
-        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
-        .to_request();
-    let resp = test::call_service(&app, req).await;
 
-    assert_eq!(resp.status(), StatusCode::FOUND);
-    assert_eq!(resp.headers().get(header::LOCATION).unwrap(), "/library");
+    for (from, to) in [("/", "/v1"), ("/v1", "/v1/library")] {
+        let req = test::TestRequest::with_uri(from)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::FOUND, "{} should redirect", from);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            &format!("{}{}", BASE, to),
+            "{} should lead to {}",
+            from,
+            to
+        );
+    }
+}
+
+// The bare paths are where OPDS 1.2 lived before 0.2.1. They still redirect there
+#[test]
+async fn the_paths_of_older_orcas_lead_into_v1() {
+    let app = setup(&ONE_LIBRARY).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+
+    for path in ["/library", "/library/books", "/library/authors/5", "/library/new",
+                 "/library/opensearch.xml", "/library/search?query=alice",
+                 "/library/books?page=2"] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::FOUND, "{} should redirect", path);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            &format!("{}/v1{}", BASE, path),
+            "{} should lead into /v1 with its query intact",
+            path
+        );
+    }
+
+    // book covers and files did not move
+    for path in ["/library/cover/5", "/library/file/4/epub"] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert!(resp.status().is_success(), "{} should be served, not moved", path);
+    }
+
+    // A path under a reserved name -> 404
+    for path in ["/v1/nonsense/at/all", "/v2/nonsense/at/all", "/v1/library/cover/5",
+                 "/auth/nonsense", "/health/nonsense"] {
+        let req = test::TestRequest::with_uri(path)
+            .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{} should be a 404", path);
+    }
 }
 
 // ------- New to the Atom feed in 0.2.1 -------
 
 #[test]
 async fn no_feed_carries_a_relative_link() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for path in ["/library", "/library/books", "/library/new", "/library/authors",
-                 "/library/tags", "/library/series", "/library/publishers",
-                 "/library/authors/5", "/library/tags/5", "/library/series/1",
-                 "/library/publishers/4", "/library/search?query=alice"] {
+    for path in ["/v1/library", "/v1/library/books", "/v1/library/new", "/v1/library/authors",
+                 "/v1/library/tags", "/v1/library/series", "/v1/library/publishers",
+                 "/v1/library/authors/5", "/v1/library/tags/5", "/v1/library/series/1",
+                 "/v1/library/publishers/4", "/v1/library/search?query=alice"] {
         let content = body_of(&app, path, &credentials).await;
         assert!(
             !content.contains(r#"href="/"#),
@@ -811,24 +1001,24 @@ async fn no_feed_carries_a_relative_link() {
 
 #[test]
 async fn the_library_offers_series_and_publishers() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library", &credentials).await;
+    let content = body_of(&app, "/v1/library", &credentials).await;
 
     assert_eq!(
         titles(&content),
         ["All Books", "Recently Added", "Authors", "Tags", "Series", "Publishers"]
     );
-    assert_eq!(count_links(&content, "/library/series"), 1);
-    assert_eq!(count_links(&content, "/library/publishers"), 1);
+    assert_eq!(count_links(&content, "/v1/library/series"), 1);
+    assert_eq!(count_links(&content, "/v1/library/publishers"), 1);
 }
 
 // The volume number decides the order
 #[test]
 async fn a_series_stands_in_reading_order() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library/series/1", &credentials).await;
+    let content = body_of(&app, "/v1/library/series/1", &credentials).await;
 
     assert_eq!(
         titles(&content),
@@ -838,31 +1028,31 @@ async fn a_series_stands_in_reading_order() {
 
 #[test]
 async fn a_publisher_holds_everything_it_put_out() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/publishers/3", &credentials).await;
+    let content = body_of(&app, "/v1/library/publishers/3", &credentials).await;
     assert_eq!(count_items(&content), 2);
     assert!(content.contains("<title>library | Gutenberg Project</title>"));
 
-    let content = body_of(&app, "/library/publishers/4", &credentials).await;
+    let content = body_of(&app, "/v1/library/publishers/4", &credentials).await;
     assert_eq!(count_items(&content), 3);
 }
 
 #[test]
 async fn a_shelf_feed_says_which_shelf_it_is() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
     for (path, title) in [
-        ("/library/books", "library | All Books"),
-        ("/library/authors/5", "library | Immanuel Kant"),
-        ("/library/tags/5", "library | fiction"),
-        ("/library/series/1", "library | Astounding Stories"),
-        ("/library/publishers/2", "library | Projekt Gutenberg"),
-        ("/library/authors", "library | Authors"),
-        ("/library/series", "library | Series"),
-        ("/library/search?query=alice", "library | Search: alice"),
+        ("/v1/library/books", "library | All Books"),
+        ("/v1/library/authors/5", "library | Immanuel Kant"),
+        ("/v1/library/tags/5", "library | fiction"),
+        ("/v1/library/series/1", "library | Astounding Stories"),
+        ("/v1/library/publishers/2", "library | Projekt Gutenberg"),
+        ("/v1/library/authors", "library | Authors"),
+        ("/v1/library/series", "library | Series"),
+        ("/v1/library/search?query=alice", "library | Search: alice"),
     ] {
         let content = body_of(&app, path, &credentials).await;
         assert!(
@@ -877,14 +1067,14 @@ async fn a_shelf_feed_says_which_shelf_it_is() {
 // Atom has nowhere to put a count, so a navigation entry says it in words.
 #[test]
 async fn a_navigation_entry_says_how_much_is_behind_it() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/series", &credentials).await;
+    let content = body_of(&app, "/v1/library/series", &credentials).await;
     assert!(content.contains("<content type=\"text\">3 books</content>"));
 
     // Projekt Gutenberg published one, and one book is not "1 books".
-    let content = body_of(&app, "/library/publishers", &credentials).await;
+    let content = body_of(&app, "/v1/library/publishers", &credentials).await;
     assert!(content.contains("<content type=\"text\">1 book</content>"));
     assert!(content.contains("<content type=\"text\">2 books</content>"));
 }
@@ -892,10 +1082,10 @@ async fn a_navigation_entry_says_how_much_is_behind_it() {
 // OPDS 1.2 carries paging in OpenSearch counts and RFC 5005 links
 #[test]
 async fn a_paged_feed_says_where_it_stands() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/books", &credentials).await;
+    let content = body_of(&app, "/v1/library/books", &credentials).await;
     assert!(content.contains("<opensearch:totalResults>7</opensearch:totalResults>"));
     assert!(content.contains("<opensearch:itemsPerPage>50</opensearch:itemsPerPage>"));
     assert!(content.contains("<opensearch:startIndex>1</opensearch:startIndex>"));
@@ -904,36 +1094,36 @@ async fn a_paged_feed_says_where_it_stands() {
     assert!(!content.contains(r#"rel="previous""#));
 
     // A shelf counts its own books, not the library's.
-    let content = body_of(&app, "/library/tags/5", &credentials).await;
+    let content = body_of(&app, "/v1/library/tags/5", &credentials).await;
     assert!(content.contains("<opensearch:totalResults>2</opensearch:totalResults>"));
 }
 
 #[test]
 async fn a_page_past_the_end_is_the_last_page() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library/books?page=9", &credentials).await;
+    let content = body_of(&app, "/v1/library/books?page=9", &credentials).await;
 
     assert_eq!(count_items(&content), 7);
     // The one page there is wears a bare URL.
-    assert!(content.contains(&format!(r#"rel="self" href="{}/library/books""#, BASE)));
+    assert!(content.contains(&format!(r#"rel="self" href="{}/v1/library/books""#, BASE)));
 }
 
 // Recently Added is a window on the library rather than a shelf of it.
 #[test]
 async fn the_newest_arrivals_are_not_paged() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library/new", &credentials).await;
+    let content = body_of(&app, "/v1/library/new", &credentials).await;
 
     assert!(!content.contains("opensearch:totalResults"));
 }
 
 #[test]
 async fn an_entry_carries_the_metadata_calibre_holds() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library/authors/4", &credentials).await;
+    let content = body_of(&app, "/v1/library/authors/4", &credentials).await;
 
     // Alice: three tags, English, published by the Gutenberg Project in 2008.
     assert!(content.contains(r#"<category term="fiction" label="fiction"/>"#));
@@ -952,56 +1142,56 @@ async fn an_entry_carries_the_metadata_calibre_holds() {
 // OPDS 1.2 cannot say "volume 3 of 5", but `related` gets a client to the rest.
 #[test]
 async fn a_book_leads_to_its_series_and_its_publisher() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/library/books", &credentials).await;
+    let content = body_of(&app, "/v1/library/books", &credentials).await;
 
-    let series = link_to(&content, "/library/series/1");
+    let series = link_to(&content, "/v1/library/series/1");
     assert!(series.contains(r#"rel="related""#), "got:{}", series);
     assert!(series.contains(r#"title="Astounding Stories""#), "got:{}", series);
 
-    let publisher = link_to(&content, "/library/publishers/4");
+    let publisher = link_to(&content, "/v1/library/publishers/4");
     assert!(publisher.contains(r#"rel="related""#), "got:{}", publisher);
 
     // Tolstoy is in no series and nobody published him, so his entry says nothing.
-    let content = body_of(&app, "/library/authors/2", &credentials).await;
+    let content = body_of(&app, "/v1/library/authors/2", &credentials).await;
     assert!(!content.contains(r#"rel="related""#));
     assert!(!content.contains("dcterms:publisher"));
 }
 
 #[test]
 async fn every_feed_below_the_root_leads_back_up() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for path in ["/library/books", "/library/new", "/library/authors", "/library/tags",
-                 "/library/series", "/library/publishers", "/library/authors/5",
-                 "/library/series/1", "/library/search?query=alice"] {
+    for path in ["/v1/library/books", "/v1/library/new", "/v1/library/authors", "/v1/library/tags",
+                 "/v1/library/series", "/v1/library/publishers", "/v1/library/authors/5",
+                 "/v1/library/series/1", "/v1/library/search?query=alice"] {
         let content = body_of(&app, path, &credentials).await;
         assert!(
-            content.contains(&format!(r#"rel="up" href="{}/library""#, BASE)),
+            content.contains(&format!(r#"rel="up" href="{}/v1/library""#, BASE)),
             "{} should lead back to the library",
             path
         );
     }
 
     // The library root is what they lead back to, so it has no `up` of its own.
-    let content = body_of(&app, "/library", &credentials).await;
+    let content = body_of(&app, "/v1/library", &credentials).await;
     assert!(!content.contains(r#"rel="up""#));
 }
 
 // An OPDS 1.2 client finds search through an OpenSearch description
 #[test]
 async fn every_library_feed_advertises_its_search() {
-    let app = setup(Https).await;
+    let app = setup(&TWO_LIBRARIES).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for path in ["/library", "/library/books", "/library/tags", "/library2"] {
+    for path in ["/v1/library", "/v1/library/books", "/v1/library/tags", "/v1/library2"] {
         let content = body_of(&app, path, &credentials).await;
-        let lib = path.split('/').nth(1).unwrap();
+        let lib = path.split('/').nth(2).unwrap();
         assert!(
             content.contains(&format!(
-                r#"rel="search" href="{}/{}/opensearch.xml""#,
+                r#"rel="search" href="{}/v1/{}/opensearch.xml""#,
                 BASE, lib
             )),
             "{} should advertise its search",
@@ -1009,18 +1199,18 @@ async fn every_library_feed_advertises_its_search() {
         );
     }
 
-    // The index spans libraries, and there is nothing there to search.
-    let content = body_of(&app, "/", &credentials).await;
+    // The catalog spans libraries, and there is nothing there to search.
+    let content = body_of(&app, "/v1", &credentials).await;
     assert!(!content.contains(r#"rel="search""#));
 }
 
 // `{searchTerms}` is OpenSearch's own spelling
 #[test]
 async fn the_opensearch_description_says_how_to_search() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let req = test::TestRequest::with_uri("/library/opensearch.xml")
+    let req = test::TestRequest::with_uri("/v1/library/opensearch.xml")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -1033,7 +1223,7 @@ async fn the_opensearch_description_says_how_to_search() {
     let body = test::read_body(resp).await;
     let content = String::from_utf8(body.to_vec()).expect("Failed to convert to String");
     assert!(content.contains(&format!(
-        r#"template="{}/library/search?query={{searchTerms}}""#,
+        r#"template="{}/v1/library/search?query={{searchTerms}}""#,
         BASE
     )));
     assert!(content.contains("<ShortName>library</ShortName>"));
@@ -1041,52 +1231,51 @@ async fn the_opensearch_description_says_how_to_search() {
 
 #[test]
 async fn search_finds_a_book_by_title_and_by_author() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    let content = body_of(&app, "/library/search?query=alice", &credentials).await;
+    let content = body_of(&app, "/v1/library/search?query=alice", &credentials).await;
     assert_eq!(count_items(&content), 1);
     assert_eq!(titles(&content), ["Alice&#39;s Adventures in Wonderland"]);
 
     // Kant wrote one book in this library, and nothing has him in the title.
-    let content = body_of(&app, "/library/search?query=kant", &credentials).await;
+    let content = body_of(&app, "/v1/library/search?query=kant", &credentials).await;
     assert_eq!(titles(&content), ["Kritik der reinen Vernunft - 2. Auflage"]);
 }
 
 // A bare `%%` / empty search field should not match the whole library
 #[test]
 async fn an_empty_search_finds_nothing() {
-    let app = setup(Http).await;
+    let app = setup(&ONE_LIBRARY).await;
     let credentials = BASE64.encode("alice:secretpassword");
 
-    for path in ["/library/search", "/library/search?query="] {
+    for path in ["/v1/library/search", "/v1/library/search?query="] {
         let content = body_of(&app, path, &credentials).await;
         assert_eq!(count_items(&content), 0, "{} should find nothing", path);
         assert!(content.contains("<title>library | Search</title>"));
     }
 }
 
-// ------- Https Tests -------
+// ------- Two libraries -------
 
-// The https config registers tests/calibre twice, so the root is a real
-// catalog listing every library rather than a redirect.
+// A root with something to choose from is a catalog rather than a redirect.
 #[test]
 async fn multiple_libraries_are_listed() {
-    let app = setup(Https).await;
+    let app = setup(&TWO_LIBRARIES).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let content = body_of(&app, "/", &credentials).await;
+    let content = body_of(&app, "/v1", &credentials).await;
 
     assert!(is_opds(&content));
     assert_eq!(count_items(&content), 2);
     assert!(content.contains("<title>library</title>"));
     assert!(content.contains("<title>library2</title>"));
-    assert_eq!(count_links(&content, "/library2"), 1);
+    assert_eq!(count_links(&content, "/v1/library2"), 1);
 }
 
 #[test]
 async fn unauthorized_request_https() {
-    let app = setup(Https).await;
-    let req = test::TestRequest::with_uri("/library")
+    let app = setup(&TWO_LIBRARIES).await;
+    let req = test::TestRequest::with_uri("/v1/library")
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -1094,7 +1283,7 @@ async fn unauthorized_request_https() {
 
 #[test]
 async fn unauthorized_request_public_route_https() {
-    let app = setup(Https).await;
+    let app = setup(&TWO_LIBRARIES).await;
     let req = test::TestRequest::with_uri("/health")
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -1103,9 +1292,9 @@ async fn unauthorized_request_public_route_https() {
 
 #[test]
 async fn authorized_request_https() {
-    let app = setup(Https).await;
+    let app = setup(&TWO_LIBRARIES).await;
     let credentials = BASE64.encode("alice:secretpassword");
-    let req = test::TestRequest::with_uri("/library")
+    let req = test::TestRequest::with_uri("/v1/library")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
         .to_request();
     let resp = test::call_service(&app, req).await;
@@ -1119,7 +1308,7 @@ async fn authorized_request_https() {
 
 #[test]
 async fn authorized_request_to_public_route_https() {
-    let app = setup(Https).await;
+    let app = setup(&TWO_LIBRARIES).await;
     let credentials = BASE64.encode("alice:secretpassword");
     let req = test::TestRequest::with_uri("/health")
         .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
@@ -1156,6 +1345,25 @@ async fn body_of(
     assert!(resp.status().is_success(), "{} should succeed", uri);
     let body = test::read_body(resp).await;
     String::from_utf8(body.to_vec()).expect("Failed to convert to String")
+}
+
+/// The status a URI answers with, and where it points if it points anywhere.
+/// For the feeds that redirect, where `body_of` would only assert success.
+async fn answer_to(
+    app: &impl Service<Request, Response = ServiceResponse, Error = actix_web::Error>,
+    uri: &str,
+    credentials: &str,
+) -> (StatusCode, Option<String>) {
+    let req = test::TestRequest::with_uri(uri)
+        .insert_header((header::AUTHORIZATION, format!("Basic {}", credentials)))
+        .to_request();
+    let resp = test::call_service(app, req).await;
+    let location = resp
+        .headers()
+        .get(header::LOCATION)
+        .map(|value| value.to_str().expect("Location is not valid UTF-8").to_string());
+
+    (resp.status(), location)
 }
 
 fn count_links(content: &str, path: &str) -> usize {

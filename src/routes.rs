@@ -14,6 +14,10 @@ use crate::shelf::{self, PageLink, Shelf, PER_PAGE};
 const ACQUISITION: &str = "acquisition"; // a feed of books
 const NAVIGATION: &str = "navigation"; // a feed of other feeds
 
+/// Where the Atom feeds live (`/v2` is for JSON)
+/// cover and a download are the same for both feeds, so those stay directly under `/{lib}`
+const V1: &str = "/v1";
+
 /// this is how OPDS 1.2 clients discover search
 const OPENSEARCH: &str = "application/opensearchdescription+xml";
 
@@ -52,11 +56,30 @@ pub(crate) fn origin(req: &HttpRequest, config: &Config) -> String {
     }
 }
 
+/// The `v1` segment is left out
 fn feed_id(path: &str) -> String {
-    match path.trim_matches('/') {
+    let path = path.trim_matches('/');
+    let path = match path {
+        "v1" => "",
+        path => path.strip_prefix("v1/").unwrap_or(path),
+    };
+
+    match path {
         "" => "urn:orca:root".to_string(),
         path => format!("urn:orca:{}", path.replace('/', ":")),
     }
+}
+
+/// `/` and the bare `/{lib}/…` paths are aliases of `/v1`
+/// `Found` rather than `MovedPermanently`
+fn moved_to_v1(req: &HttpRequest, config: &Config, path: &str) -> HttpResponse {
+    let target = format!("{}{}{}", origin(req, config), V1, path);
+    let target = match req.query_string() {
+        "" => target,
+        query => format!("{}?{}", target, query),
+    };
+
+    HttpResponse::Found().append_header(("Location", target)).finish()
 }
 
 /// config plus the absolute URL of this feed for `<link rel="self">`.
@@ -65,6 +88,7 @@ fn feed_ctx(req: &HttpRequest, config: &Config, lib: Option<&str>) -> tera::Cont
     let mut ctx = tera::Context::new();
     let origin = origin(req, config);
     ctx.insert("self_url", &format!("{}{}", origin, req.path()));
+    ctx.insert("catalog", &format!("{}{}", origin, V1));
     ctx.insert("base", &origin);
     ctx.insert("feed_id", &feed_id(req.path()));
     ctx.insert("author", config.author(lib));
@@ -87,7 +111,7 @@ fn shelf_ctx(req: &HttpRequest, config: &Config, lib: &str, kind: &str) -> tera:
 
 /// root of the Atom feed (JSON is under `/v2`)
 fn root_of(req: &HttpRequest, config: &Config, lib: &str) -> String {
-    format!("{}/{}", origin(req, config), lib)
+    format!("{}{}/{}", origin(req, config), V1, lib)
 }
 
 /// Calibre stores a blurb as HTML - Rendering / escaping happens here
@@ -231,8 +255,9 @@ fn attachment(path: &str) -> Result<fs::NamedFile, Error> {
         }))
 }
 
+/// public, like `/auth`
 #[actix_web::get("/health")]
-async fn health(_auth: Authorized) -> impl Responder {
+async fn health() -> impl Responder {
     HttpResponse::Ok().body("OK")
 }
 
@@ -292,15 +317,18 @@ async fn book_file(
     attachment(&format!("{}/{}", library, file))
 }
 
-#[actix_web::get("/")]
-async fn index(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest) -> impl Responder {
-    let libraries: Vec<String> = data.db.keys().cloned().collect();
+#[actix_web::get("/v1")]
+async fn index(data: web::Data<AppState>, auth: Authorized, req: HttpRequest) -> impl Responder {
+    let mut libraries: Vec<String> = data
+        .db
+        .keys()
+        .filter(|lib| auth.may_reach(data.config, &format!("{}/{}", V1, lib)))
+        .cloned()
+        .collect();
+    libraries.sort();
 
     if libraries.len() == 1 {
-        let lib = &libraries[0];
-        return HttpResponse::Found()
-            .append_header(("Location", format!("/{}", lib)))
-            .finish();
+        return moved_to_v1(&req, data.config, &format!("/{}", libraries[0]));
     }
 
     let updated = data
@@ -316,7 +344,7 @@ async fn index(data: web::Data<AppState>, _auth: Authorized, req: HttpRequest) -
     render_template(&data.templates, "index.xml.tera", ctx)
 }
 
-#[actix_web::get("/{lib}")]
+#[actix_web::get("/v1/{lib}")]
 async fn opds(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -341,7 +369,7 @@ async fn opds(
 }
 
 /// The OpenSearch description document. An OPDS 1.2 client discovers search this way.
-#[actix_web::get("/{lib}/opensearch.xml")]
+#[actix_web::get("/v1/{lib}/opensearch.xml")]
 async fn opensearch(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -357,7 +385,7 @@ async fn opensearch(
     rendered(&data.templates, "opensearch.xml.tera", ctx, OPENSEARCH)
 }
 
-#[actix_web::get("{lib}/tags")]
+#[actix_web::get("/v1/{lib}/tags")]
 async fn tags(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -378,7 +406,7 @@ async fn tags(
     shelves_feed(&data, &req, &lib, "Tags", Shelf::Tag, &entries, calibre::updated(&db))
 }
 
-#[actix_web::get("{lib}/authors")]
+#[actix_web::get("/v1/{lib}/authors")]
 async fn authors(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -401,7 +429,7 @@ async fn authors(
 
 /// `all_series` rather than `series`:
 /// a plural that is also a singular would shadow every binding of that name.
-#[actix_web::get("{lib}/series")]
+#[actix_web::get("/v1/{lib}/series")]
 async fn all_series(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -422,7 +450,7 @@ async fn all_series(
     shelves_feed(&data, &req, &lib, "Series", Shelf::Series, &entries, calibre::updated(&db))
 }
 
-#[actix_web::get("{lib}/publishers")]
+#[actix_web::get("/v1/{lib}/publishers")]
 async fn publishers(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -443,7 +471,7 @@ async fn publishers(
     shelves_feed(&data, &req, &lib, "Publishers", Shelf::Publisher, &entries, calibre::updated(&db))
 }
 
-#[actix_web::get("{lib}/books")]
+#[actix_web::get("/v1/{lib}/books")]
 async fn getbooks(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -455,7 +483,7 @@ async fn getbooks(
     books_feed(&data, &req, &lib, Shelf::Everything, query.page.unwrap_or(1))
 }
 
-#[actix_web::get("{lib}/tags/{id}")]
+#[actix_web::get("/v1/{lib}/tags/{id}")]
 async fn books_by_tag(
     data: web::Data<AppState>,
     path: web::Path<(String, i32)>,
@@ -467,7 +495,7 @@ async fn books_by_tag(
     books_feed(&data, &req, &lib, Shelf::Tag(tag), query.page.unwrap_or(1))
 }
 
-#[actix_web::get("{lib}/authors/{id}")]
+#[actix_web::get("/v1/{lib}/authors/{id}")]
 async fn books_by_author(
     data: web::Data<AppState>,
     path: web::Path<(String, i32)>,
@@ -480,7 +508,7 @@ async fn books_by_author(
 }
 
 /// One series, in reading order.
-#[actix_web::get("{lib}/series/{id}")]
+#[actix_web::get("/v1/{lib}/series/{id}")]
 async fn books_in_series(
     data: web::Data<AppState>,
     path: web::Path<(String, i32)>,
@@ -492,7 +520,7 @@ async fn books_in_series(
     books_feed(&data, &req, &lib, Shelf::Series(series), query.page.unwrap_or(1))
 }
 
-#[actix_web::get("{lib}/publishers/{id}")]
+#[actix_web::get("/v1/{lib}/publishers/{id}")]
 async fn books_by_publisher(
     data: web::Data<AppState>,
     path: web::Path<(String, i32)>,
@@ -505,7 +533,7 @@ async fn books_by_publisher(
 }
 
 /// What the OpenSearch description points at. `query` rather than `q`
-#[actix_web::get("{lib}/search")]
+#[actix_web::get("/v1/{lib}/search")]
 async fn search(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -520,7 +548,7 @@ async fn search(
 
 /// The newest arrivals, in the order they arrived. A window on the library
 /// rather than a shelf of it, so it is not paged and carries no page links.
-#[actix_web::get("{lib}/new")]
+#[actix_web::get("/v1/{lib}/new")]
 async fn recently_added(
     data: web::Data<AppState>,
     path: web::Path<String>,
@@ -543,4 +571,68 @@ async fn recently_added(
     ctx.insert("books", &books);
     ctx.insert("updated", &calibre::updated(&db));
     render_template(&data.templates, "books.xml.tera", ctx)
+}
+
+#[actix_web::get("/")]
+async fn catalog_moved(
+    data: web::Data<AppState>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    moved_to_v1(&req, data.config, "")
+}
+
+/// Only a path that could once have been an OPDS 1.2 one is an alias of `/v1`.
+fn alias(req: &HttpRequest, config: &Config, lib: &str, path: &str) -> HttpResponse {
+    match crate::RESERVED.contains(&lib) {
+        true => HttpResponse::NotFound().body(format!("No such feed: {}", path)),
+        false => moved_to_v1(req, config, path),
+    }
+}
+
+/// Where OPDS 1.2 used to live. Registered after the covers and the downloads,
+#[actix_web::get("/{lib}")]
+async fn library_moved(
+    data: web::Data<AppState>,
+    path: web::Path<String>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let lib = path.into_inner();
+    alias(&req, data.config, &lib, &format!("/{}", lib))
+}
+
+#[actix_web::get("/{lib}/{feed:.*}")]
+async fn feed_moved(
+    data: web::Data<AppState>,
+    path: web::Path<(String, String)>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, feed) = path.into_inner();
+    alias(&req, data.config, &lib, &format!("/{}/{}", lib, feed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_feed_is_identified_by_what_it_holds_not_by_where_it_is() {
+        assert_eq!(feed_id("/v1"), "urn:orca:root");
+        assert_eq!(feed_id("/v1/library"), "urn:orca:library");
+        assert_eq!(feed_id("/v1/library/tags/5"), "urn:orca:library:tags:5");
+
+        // The ids these produced before the feeds moved into `/v1`, unchanged.
+        assert_eq!(feed_id("/"), "urn:orca:root");
+        assert_eq!(feed_id("/library/tags/5"), "urn:orca:library:tags:5");
+    }
+
+    // Only the segment, never the prefix: `v1` is reserved, `v1x` is a library
+    // anyone may have.
+    #[test]
+    fn a_library_whose_name_begins_with_v1_keeps_it() {
+        assert_eq!(feed_id("/v1/v1x/books"), "urn:orca:v1x:books");
+        assert_eq!(feed_id("/v1x/books"), "urn:orca:v1x:books");
+    }
 }

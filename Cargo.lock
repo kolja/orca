@@ -1700,7 +1700,6 @@ dependencies = [
  "percent-encoding",
  "quick-xml",
  "rand 0.10.2",
- "regex",
  "reqwest",
  "rusqlite",
  "rust-embed",

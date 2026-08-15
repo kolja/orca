@@ -4,5 +4,5 @@
   <Description>Search {{ lib }} by title or author</Description>
   <InputEncoding>UTF-8</InputEncoding>
   <OutputEncoding>UTF-8</OutputEncoding>
-  <Url type="application/atom+xml;profile=opds-catalog;kind=acquisition" template="{{ base }}/{{ lib }}/search?query={searchTerms}"/>
+  <Url type="application/atom+xml;profile=opds-catalog;kind=acquisition" template="{{ catalog }}/{{ lib }}/search?query={searchTerms}"/>
 </OpenSearchDescription>

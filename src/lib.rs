@@ -18,7 +18,7 @@ use actix_web::dev::{ServiceFactory, ServiceRequest, ServiceResponse};
 use actix_web::middleware::NormalizePath;
 use actix_web::{web, App, HttpServer};
 use anyhow::{anyhow, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -38,12 +38,15 @@ fn format_to_mime_filter(format: &str, _: Kwargs, _: &State) -> &'static str {
 fn open_library(library: &str, path: &str) -> Result<Connection> {
     let db_path = format!("{}/metadata.db", path);
 
-    // Checked before opening. Otherwise `Connection::open` would *create* an empty database
+    // Checked before opening
     if !Path::new(&db_path).is_file() {
         return Err(anyhow!("library '{}': no Calibre database at '{}'", library, db_path));
     }
 
-    let db = Connection::open(&db_path)
+    // Orca never writes to a Calibre library, so the connection should be read only
+    let read_only = OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX | OpenFlags::SQLITE_OPEN_URI;
+
+    let db = Connection::open_with_flags(&db_path, read_only)
         .map_err(|e| anyhow!("library '{}': could not open '{}': {}", library, db_path, e))?;
 
     // Opening succeeds for anything SQLite can read, so only a query proves that
@@ -300,14 +303,23 @@ mod tests {
         assert!(err.contains("no Calibre database at 'tests/calibr/metadata.db'"), "{}", err);
     }
 
-    // The reason `open_library` checks before opening: SQLite would create the missing file,
-    // turning a config typo into a 500 on every request instead of an error at startup.
+    // Guarded twice over: the check in `open_library`, and a connection that could not
+    // create the file if the check were ever dropped.
     #[test]
     fn a_mistyped_path_does_not_create_a_database() {
         let dir = TempDir::new().unwrap();
 
         assert!(create_app(config_for(&[("library", dir.path().to_str().unwrap())])).is_err());
         assert!(!dir.path().join("metadata.db").exists());
+    }
+
+    #[test]
+    fn a_library_is_opened_read_only() {
+        let state = create_app(config_for(&[("library", "tests/calibre")])).unwrap();
+        let db = state.db["library"].lock().unwrap();
+
+        let err = db.execute("DELETE FROM books", []).unwrap_err().to_string();
+        assert!(err.contains("readonly database"), "{}", err);
     }
 
     #[test]

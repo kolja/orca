@@ -17,6 +17,8 @@ Leaving out `[authentication]` altogether serves every library without a login.
 `/health` needs no credentials any more
 The catalog lists only the libraries the caller can open.
 
+Calibre libraries are opened read-only
+
 ## 0.2.1
 
 - added a one-line orca demo

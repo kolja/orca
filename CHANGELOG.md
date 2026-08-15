@@ -19,6 +19,9 @@ The catalog lists only the libraries the caller can open.
 
 Calibre libraries are opened read-only
 
+Spelling of Protocol in the config: `http` and `https` (all lowercase). 
+`Http` and `Https` still work but consider that spelling deprecated.
+
 ## 0.2.1
 
 - added a one-line orca demo

@@ -2,7 +2,7 @@
 [server]
 ip = "127.0.0.1"
 port = 8443
-protocol = "Https"
+protocol = "https"
 cert = "tests/cert.pem"
 key = "tests/key.pem"
 

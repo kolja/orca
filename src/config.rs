@@ -35,10 +35,14 @@ impl Config {
     }
 }
 
+/// A scheme is written lowercase (RFC 3986)
+/// `Http` is deprecated now
 #[derive(Serialize, Deserialize, Clone)]
-#[serde(tag = "protocol")]
+#[serde(tag = "protocol", rename_all = "lowercase")]
 pub enum Protocol {
+    #[serde(alias = "Http")]
     Http,
+    #[serde(alias = "Https")]
     Https {
         cert: String,
         key: String,
@@ -204,7 +208,7 @@ mod tests {
         [server]
         ip = "127.0.0.1"
         port = 8080
-        protocol = "Http"
+        protocol = "http"
 
         [authentication.login]
         alice = "...passwordhash..."
@@ -287,7 +291,7 @@ mod tests {
         [server]
         ip = "127.0.0.1"
         port = 8080
-        protocol = "Https"
+        protocol = "https"
         cert = "/path/to/cert.pem"
         key = "/path/to/key.pem"
 
@@ -332,7 +336,7 @@ mod tests {
         [server]
         ip = "127.0.0.1"
         port = 8080
-        protocol = "Http"
+        protocol = "http"
 
         [authentication.login]
         alice = "...passwordhash..."
@@ -357,6 +361,31 @@ mod tests {
 
         assert!(err.contains("expected struct Library"), "{}", err);
         assert!(err.contains(broken.path().to_str().unwrap()), "{}", err);
+    }
+
+    // The docs say lowercase; `Http` is deprecated, but still works for now
+    #[test]
+    fn a_protocol_is_read_in_the_spelling_its_config_was_written_in() {
+        let tls = "\n        cert = \"cert.pem\"\n        key = \"key.pem\"";
+
+        for (spelling, keys) in [
+            ("http", ""), ("Http", ""),
+            ("https", tls), ("Https", tls),
+        ] {
+            let named = config_file(&VALID.replacen("\"http\"", &format!("\"{}\"{}", spelling, keys), 1));
+
+            if let Err(err) = read_config(named.path().to_str().unwrap()) {
+                panic!("protocol = \"{}\" should parse: {}", spelling, err);
+            }
+        }
+    }
+
+    #[test]
+    fn a_protocol_that_is_no_scheme_offers_the_canonical_spellings() {
+        let typo = config_file(&VALID.replacen("\"http\"", "\"htpp\"", 1));
+
+        let err = refusal(&typo, "a protocol that is no scheme must not start a server");
+        assert!(err.contains("`Http`, `http`, `Https`, `https`"), "{}", err);
     }
 
     // omitting the auth section means: no authentication required (see for example the demo image)
@@ -420,7 +449,7 @@ mod tests {
         [server]
         ip = "127.0.0.1"
         port = 8080
-        protocol = "Http"
+        protocol = "http"
 
         [authentication.login]
         alice = "...reallylonghash..."

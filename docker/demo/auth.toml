@@ -3,7 +3,7 @@
 [server]
 ip = "0.0.0.0"
 port = 23117
-protocol = "Http"
+protocol = "http"
 
 [authentication.login]
 # orca --hash alice:secretpassword

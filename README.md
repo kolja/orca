@@ -49,12 +49,12 @@ koljaw/orca:latest
 
 If you point the environment variable `ORCA_CONFIG` to a `.toml` file, that's where the configuration will be read from. Otherwise, it will look for a file named `orca.toml` or `orca/config.toml` in `$HOME/.config/`.
 
-The server will either start as HTTP or HTTPS server depending on the value of 'protocol'. If you set it to 'https', you have to provide a path to a certificate and a key file.
+The server will either start as HTTP or HTTPS server depending on the value of `protocol`. If you set it to `https`, you have to provide a path to a certificate and a key file.
 ```toml
 [server]
 ip = "<your_ip>"
 port = 8080
-protocol = "Https" # or "Http"
+protocol = "https" # or "http"
 cert = "/path/to/cert.pem"
 key = "/path/to/key.pem"
 public_url = "https://orca.example.com" # optional, see below

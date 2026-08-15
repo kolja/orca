@@ -2,7 +2,7 @@
 [server]
 ip = "127.0.0.1"
 port = 8888
-protocol = "Http"
+protocol = "http"
 
 [authentication]
 # `/library/**` and `/library` mean the same thing

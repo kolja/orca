@@ -535,14 +535,16 @@ pub fn cover_path(db: &Connection, book: i32) -> rusqlite::Result<String> {
 /// decides the extension.
 pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<String> {
     let mut stmt = db.prepare(
-        "SELECT b.path, d.name AS file
+        "SELECT b.path, d.name AS file, d.format
             FROM books b
             JOIN data d ON b.id = d.book
             WHERE b.id = ?1 AND d.format = ?2 COLLATE NOCASE;",
     )?;
-    let (path, file): (String, String) =
-        stmt.query_row(params![book, format], |row| Ok((row.get(0)?, row.get(1)?)))?;
-    Ok(format!("{}/{}.{}", path, file, format))
+    let (path, file, format): (String, String, String) =
+        stmt.query_row(params![book, format], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?;
+    Ok(format!("{}/{}.{}", path, file, format.to_lowercase()))
 }
 
 /// The columns every book feed needs.
@@ -1091,6 +1093,16 @@ mod tests {
         assert!(file_path(&db, 5, "epub").expect("file").ends_with(".epub"));
         // Calibre spells its formats in upper case, the routes in lower.
         assert!(file_path(&db, 4, "azw3").expect("file").ends_with(".azw3"));
+    }
+
+    // The row is found no matter which case was asked for
+    // The result is still the file on disk: otherwise the download is a 500 on ext4
+    #[test]
+    fn a_format_asked_for_in_capitals_is_still_the_file_on_disk() {
+        let db = library();
+        let shouted = file_path(&db, 5, "EPUB").expect("file");
+        assert_eq!(shouted, file_path(&db, 5, "epub").expect("file"));
+        assert!(shouted.ends_with(".epub"));
     }
 
     // Kant has an epub only. Asking for a pdf -> 404

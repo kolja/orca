@@ -187,8 +187,13 @@ pub struct BookMetadata {
     #[serde(rename = "@type")]
     pub kind: &'static str,
     pub title: String,
+    #[serde(rename = "sortAs", skip_serializing_if = "Option::is_none")]
+    pub sort_as: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
+    /// ISBN or DOI -- `identifier` is the catalog's own urn
+    #[serde(rename = "altIdentifier", skip_serializing_if = "Vec::is_empty")]
+    pub alt_identifier: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub author: Vec<Contributor>,
     /// BCP 47 tags; the schema checks them against the full grammar.
@@ -214,6 +219,9 @@ pub struct BookMetadata {
 #[derive(Debug, Serialize)]
 pub struct Contributor {
     pub name: String,
+    /// e.g. "Le Guin, Ursula K."
+    #[serde(rename = "sortAs", skip_serializing_if = "Option::is_none")]
+    pub sort_as: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<Link>,
 }
@@ -237,6 +245,8 @@ pub struct BelongsTo {
 #[derive(Debug, Serialize)]
 pub struct Series {
     pub name: String,
+    #[serde(rename = "sortAs", skip_serializing_if = "Option::is_none")]
+    pub sort_as: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub identifier: Option<String>,
     /// `series_index` can be 1.5 in Calibre
@@ -304,9 +314,12 @@ mod tests {
         let metadata = BookMetadata {
             kind: BOOK,
             title: "Galactic Patrol".to_string(),
+            sort_as: None,
             identifier: None,
+            alt_identifier: Vec::new(),
             author: vec![Contributor {
                 name: "E. E. Smith".to_string(),
+                sort_as: Some("Smith, E. E.".to_string()),
                 links: Vec::new(),
             }],
             language: Vec::new(),
@@ -315,6 +328,7 @@ mod tests {
             description: None,
             publisher: vec![Contributor {
                 name: "Street & Smith".to_string(),
+                sort_as: None,
                 links: Vec::new(),
             }],
             subject: vec![Subject {
@@ -324,6 +338,7 @@ mod tests {
             belongs_to: Some(BelongsTo {
                 series: Series {
                     name: "Astounding Stories".to_string(),
+                    sort_as: None,
                     identifier: None,
                     position: Some(3.0),
                     links: vec![Link::new("/v2/library/series/1").mime(FEED)],
@@ -336,7 +351,7 @@ mod tests {
             json!({
                 "@type": "http://schema.org/Book",
                 "title": "Galactic Patrol",
-                "author": [{ "name": "E. E. Smith" }],
+                "author": [{ "name": "E. E. Smith", "sortAs": "Smith, E. E." }],
                 "publisher": [{ "name": "Street & Smith" }],
                 "subject": [{ "name": "science fiction" }],
                 "belongsTo": {
@@ -355,6 +370,7 @@ mod tests {
     fn an_author_and_a_subject_lead_somewhere() {
         let author = Contributor {
             name: "Lewis Carroll".to_string(),
+            sort_as: None,
             links: vec![Link::new("/v2/library/authors/4").mime(FEED)],
         };
         let subject = Subject {

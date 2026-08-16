@@ -14,7 +14,7 @@ use std::sync::MutexGuard;
 
 use crate::appstate::AppState;
 use crate::authorized::Authorized;
-use crate::calibre::{self, Book};
+use crate::calibre::{self, Book, Identifier};
 use crate::config::CATALOG;
 use crate::opds2::{
     BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
@@ -69,6 +69,14 @@ fn root_of(base: &str, lib: &str) -> String {
     format!("{}/v2/{}", base, lib)
 }
 
+fn sort_as(sort: &str, name: &str) -> Option<String> {
+    match sort.trim() {
+        "" => None,
+        sort if sort == name => None,
+        sort => Some(sort.to_string()),
+    }
+}
+
 fn identifier(book: &Book, lib: &str) -> String {
     if book.uuid.is_empty() {
         format!("urn:orca:{}:book:{}", lib, book.id)
@@ -90,6 +98,11 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
             .title(format!("{}.{}", book.title, format.name))
     }));
 
+    // This book as a web page: When the client let's you "open in browser"
+    if let Some(page) = &book.alternate {
+        links.push(Link::new(page.clone()).rel("alternate").mime("text/html"));
+    }
+
     // Calibre keeps one cover and no thumbnail, so the one image is the cover.
     let images = match book.has_cover {
         true => vec![Link::new(format!("{}/{}/cover/{}", base, lib, book.id))
@@ -102,13 +115,16 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
         metadata: BookMetadata {
             kind: BOOK,
             title: book.title.clone(),
+            sort_as: sort_as(&book.sort, &book.title),
             identifier: Some(identifier(book, lib)),
+            alt_identifier: book.identifiers.iter().filter_map(Identifier::uri).collect(),
             // link from a book to the rest of what its author wrote.
             author: book
                 .authors
                 .iter()
                 .map(|author| Contributor {
                     name: author.name.clone(),
+                    sort_as: sort_as(&author.sort, &author.name),
                     links: vec![
                         Link::new(format!("{}/v2/{}/authors/{}", base, lib, author.id)).mime(FEED),
                     ],
@@ -126,6 +142,7 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
                 .iter()
                 .map(|publisher| Contributor {
                     name: publisher.name.clone(),
+                    sort_as: None,
                     links: vec![
                         Link::new(format!("{}/v2/{}/publishers/{}", base, lib, publisher.id))
                             .mime(FEED),
@@ -143,6 +160,7 @@ fn publication(book: &Book, lib: &str, base: &str) -> Publication {
             belongs_to: book.series.as_ref().map(|series| BelongsTo {
                 series: Series {
                     name: series.name.clone(),
+                    sort_as: sort_as(&series.sort, &series.name),
                     identifier: Some(format!("urn:orca:{}:series:{}", lib, series.id)),
                     position: Some(series.index),
                     links: vec![

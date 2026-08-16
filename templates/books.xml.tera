@@ -16,6 +16,9 @@
     <dcterms:publisher>{{ book.publisher.name }}</dcterms:publisher>
     {%- endif %}
     <dcterms:issued>{{ book.pubdate }}</dcterms:issued>
+    {%- if book.alternate %}
+    <link href="{{ book.alternate }}" type="text/html" rel="alternate"/>
+    {%- endif %}
     <link href="{{ base }}/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image"/>
     <link href="{{ base }}/{{ lib }}/cover/{{ book.id }}" type="image/jpeg" rel="http://opds-spec.org/image/thumbnail"/>
     {%- if book.series %}

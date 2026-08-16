@@ -422,6 +422,56 @@ async fn a_publication_carries_the_shelf_it_came_off() {
     assert_eq!(metadata["belongsTo"]["series"]["position"], 3.0);
 }
 
+// the catalog's own urn: `identifier`. ISBN: `altIdentifier`
+#[test]
+async fn a_publication_carries_the_names_it_goes_by_elsewhere() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let lovecraft = publication(&app, 8).await;
+
+    validates(&lovecraft, PUBLICATION);
+    assert_eq!(
+        lovecraft["metadata"]["altIdentifier"][0],
+        "https://www.gutenberg.org/ebooks/70652"
+    );
+    let alternate: Vec<&Value> = lovecraft["links"]
+        .as_array()
+        .expect("links")
+        .iter()
+        .filter(|link| link["rel"] == "alternate")
+        .collect();
+    assert_eq!(alternate.len(), 1);
+    assert_eq!(alternate[0]["href"], "https://www.gutenberg.org/ebooks/70652");
+    assert_eq!(alternate[0]["type"], "text/html");
+}
+
+#[test]
+async fn a_publication_with_no_identifiers_carries_none() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+    let alice = publication(&app, 4).await;
+
+    assert!(alice["metadata"].get("altIdentifier").is_none());
+    assert!(!alice["links"].as_array().expect("links").iter().any(|link| link["rel"] == "alternate"));
+}
+
+#[test]
+async fn a_publication_carries_a_sort_key_only_where_it_says_something() {
+    let app = setup(&TEST_HTTP_CONFIG).await;
+
+    let galileo = publication(&app, 6).await;
+    validates(&galileo, PUBLICATION);
+    assert_eq!(galileo["metadata"]["title"], "The sidereal messenger of Galileo Galilei");
+    assert_eq!(
+        galileo["metadata"]["sortAs"],
+        "sidereal messenger of Galileo Galilei, The"
+    );
+    assert_eq!(galileo["metadata"]["author"][0]["sortAs"], "Galilei, Galileo");
+
+    // Nothing to move, so nothing to say: Alice sorts under her own title.
+    let alice = publication(&app, 4).await;
+    assert!(alice["metadata"].get("sortAs").is_none());
+    assert_eq!(alice["metadata"]["author"][0]["sortAs"], "Carroll, Lewis");
+}
+
 // no empty `belongsTo`
 #[test]
 async fn a_book_on_no_shelf_belongs_to_nothing() {

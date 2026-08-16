@@ -1139,6 +1139,29 @@ async fn an_entry_carries_the_metadata_calibre_holds() {
     assert!(content.contains("<summary type=\"text\">"));
 }
 
+// what a client offers as "open in browser".
+#[test]
+async fn an_entry_leads_to_the_page_the_book_came_from() {
+    let app = setup(&ONE_LIBRARY).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let content = body_of(&app, "/v1/library/books", &credentials).await;
+
+    assert!(content.contains(
+        r#"<link href="https://www.gutenberg.org/ebooks/70652" type="text/html" rel="alternate"/>"#
+    ));
+
+    for entry in content.split("<entry>").skip(1) {
+        assert!(
+            entry.matches(r#"rel="alternate""#).count() <= 1,
+            "an entry may carry one alternate at most:\n{}",
+            entry
+        );
+    }
+    // Alice has no identifiers in Calibre, so: no alternate.
+    let alice = body_of(&app, "/v1/library/authors/4", &credentials).await;
+    assert!(!alice.contains(r#"rel="alternate""#), "{}", alice);
+}
+
 // OPDS 1.2 cannot say "volume 3 of 5", but `related` gets a client to the rest.
 #[test]
 async fn a_book_leads_to_its_series_and_its_publisher() {

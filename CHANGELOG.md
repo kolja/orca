@@ -22,6 +22,10 @@ Calibre libraries are opened read-only
 Spelling of Protocol in the config: `http` and `https` (all lowercase). 
 `Http` and `Https` still work but consider that spelling deprecated.
 
+Some `identifiers` from books in Calibre are exposed to the feed (isbn, doi...)
+
+OPDS 2.0 publications carry `sortAs` for the title, the authors and the series
+
 ## 0.2.1
 
 - added a one-line orca demo

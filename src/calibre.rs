@@ -25,6 +25,8 @@ pub struct Book {
     pub id: i32,
     pub uuid: String,
     pub title: String,
+    /// e.g. "Hobbit, The" for "The Hobbit".
+    pub sort: String,
     pub pubdate: String,
     pub updated: String,
     /// Calibre's comment, as the HTML it is stored as. `plain_text` renders it.
@@ -37,12 +39,50 @@ pub struct Book {
     pub tags: Vec<Tag>,
     pub publisher: Option<Publisher>,
     pub series: Option<Series>,
+    pub identifiers: Vec<Identifier>,
+    /// a book could point to a website via `rel="alternate"`
+    pub alternate: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct Author {
     pub id: i32,
     pub name: String,
+    pub sort: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Identifier {
+    /// `isbn`, `uri`, `doi`, `amazon`, `mobi-asin`, whatever was typed
+    pub kind: String,
+    pub value: String,
+}
+
+impl Identifier {
+    pub fn uri(&self) -> Option<String> {
+        match self.kind.as_str() {
+            "isbn" => Some(format!("urn:isbn:{}", self.value)),
+            "issn" => Some(format!("urn:issn:{}", self.value)),
+            "doi" => Some(format!("https://doi.org/{}", self.value)),
+            _ if is_uri(&self.value) => Some(self.value.clone()),
+            _ => None,
+        }
+    }
+
+    fn is_web_page(&self) -> bool {
+        self.value.starts_with("http://") || self.value.starts_with("https://")
+    }
+}
+
+fn is_uri(value: &str) -> bool {
+    match value.split_once(':') {
+        Some((scheme, rest)) => {
+            !rest.is_empty()
+                && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                && scheme.chars().all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+        }
+        None => false,
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -82,6 +122,7 @@ pub struct Series {
     pub name: String,
     /// Calibre's `series_index`: volume in series (could also be 1.5)
     pub index: f64,
+    pub sort: String,
 }
 
 /// Calibre keeps a blurb as HTML, which neither Atom's `<content type="text">`
@@ -505,10 +546,12 @@ pub fn file_path(db: &Connection, book: i32, format: &str) -> rusqlite::Result<S
 }
 
 /// The columns every book feed needs.
-const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.pubdate, b.last_modified, b.has_cover, b.series_index, c.text AS synopsis,
+const BOOK_COLUMNS: &str = "b.id, b.uuid, b.title, b.sort, b.pubdate, b.last_modified, b.has_cover, b.series_index, c.text AS synopsis,
     (SELECT bs.series FROM books_series_link bs WHERE bs.book = b.id) AS series_id,
     (SELECT s.name FROM books_series_link bs JOIN series s ON bs.series = s.id
         WHERE bs.book = b.id) AS series,
+    (SELECT s.sort FROM books_series_link bs JOIN series s ON bs.series = s.id
+        WHERE bs.book = b.id) AS series_sort,
     (SELECT bp.publisher FROM books_publishers_link bp WHERE bp.book = b.id) AS publisher_id,
     (SELECT p.name FROM books_publishers_link bp JOIN publishers p ON bp.publisher = p.id
         WHERE bp.book = b.id) AS publisher";
@@ -527,6 +570,7 @@ fn query_books(
             .unwrap_or(None)
             .map(|name| Series {
                 id: row.get("series_id").unwrap_or_default(),
+                sort: row.get("series_sort").unwrap_or_else(|_| name.clone()),
                 name,
                 index: row.get("series_index").unwrap_or(1.0),
             });
@@ -541,6 +585,7 @@ fn query_books(
             id: row.get("id")?,
             uuid: row.get("uuid").unwrap_or_default(),
             title: row.get("title")?,
+            sort: row.get("sort").unwrap_or_default(),
             pubdate: to_rfc3339(&row.get::<_, String>("pubdate")?),
             updated: to_rfc3339(&row.get::<_, String>("last_modified")?),
             synopsis: row.get("synopsis").unwrap_or_default(),
@@ -551,6 +596,8 @@ fn query_books(
             tags: Vec::new(),
             publisher,
             series,
+            identifiers: Vec::new(),
+            alternate: None,
         })
     })?;
 
@@ -560,11 +607,18 @@ fn query_books(
     let mut languages = languages_by_book(db, &book_ids)?;
     let mut tags = tags_by_book(db, &book_ids)?;
     let mut formats = formats_by_book(db, &book_ids)?;
+    let mut identifiers = identifiers_by_book(db, &book_ids)?;
     for book in &mut books {
         book.authors = authors.remove(&book.id).unwrap_or_default();
         book.languages = languages.remove(&book.id).unwrap_or_default();
         book.tags = tags.remove(&book.id).unwrap_or_default();
         book.formats = formats.remove(&book.id).unwrap_or_default();
+        book.identifiers = identifiers.remove(&book.id).unwrap_or_default();
+        book.alternate = book
+            .identifiers
+            .iter()
+            .find(|identifier| identifier.is_web_page())
+            .map(|identifier| identifier.value.clone());
     }
     Ok(books)
 }
@@ -578,7 +632,7 @@ fn authors_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMa
     }
 
     let mut stmt = db.prepare(&format!(
-        "SELECT ba.book, a.id, a.name
+        "SELECT ba.book, a.id, a.name, a.sort
             FROM books_authors_link ba
             JOIN authors a ON ba.author = a.id
             WHERE ba.book IN ({})
@@ -592,11 +646,42 @@ fn authors_by_book(db: &Connection, book_ids: &[i32]) -> rusqlite::Result<HashMa
             Author {
                 id: row.get(1)?,
                 name: row.get(2)?,
+                sort: row.get(3).unwrap_or_default(),
             },
         ))
     })?;
 
     Ok(group_by_book(collect_rows(rows, "book author")))
+}
+
+/// `uri` sorts first and should end up in `rel="alternate"`
+fn identifiers_by_book(
+    db: &Connection,
+    book_ids: &[i32],
+) -> rusqlite::Result<HashMap<i32, Vec<Identifier>>> {
+    if book_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut stmt = db.prepare(&format!(
+        "SELECT i.book, i.type, i.val
+            FROM identifiers i
+            WHERE i.book IN ({})
+            ORDER BY i.book, i.type NOT IN ('uri', 'url'), i.type;",
+        placeholders(book_ids.len())
+    ))?;
+
+    let rows = stmt.query_map(params_from_iter(book_ids), |row| {
+        Ok((
+            row.get::<_, i32>(0)?,
+            Identifier {
+                kind: row.get::<_, String>(1)?.to_lowercase(),
+                value: row.get(2)?,
+            },
+        ))
+    })?;
+
+    Ok(group_by_book(collect_rows(rows, "book identifier")))
 }
 
 /// The tags of each of the given books, by book id.
@@ -734,6 +819,75 @@ mod tests {
 
         let tolstoy = books.iter().find(|book| book.id == 2).expect("Tolstoy");
         assert_eq!(tolstoy.languages, ["ru"]);
+    }
+
+    fn identifier(kind: &str, value: &str) -> Identifier {
+        Identifier { kind: kind.to_string(), value: value.to_string() }
+    }
+
+    #[test]
+    fn an_identifier_that_has_a_uri_form_is_written_in_it() {
+        assert_eq!(
+            identifier("isbn", "978-0-7953-2581-6").uri().as_deref(),
+            Some("urn:isbn:978-0-7953-2581-6")
+        );
+        assert_eq!(
+            identifier("doi", "10.1000/182").uri().as_deref(),
+            Some("https://doi.org/10.1000/182")
+        );
+        // Already a URI: passed on as it stands, whatever the scheme is called.
+        assert_eq!(
+            identifier("uri", "https://www.gutenberg.org/ebooks/70652").uri().as_deref(),
+            Some("https://www.gutenberg.org/ebooks/70652")
+        );
+        assert_eq!(
+            identifier("uri", "urn:uuid:8ea07544-83e2-48b2-a4f6-fd9105938da4").uri().as_deref(),
+            Some("urn:uuid:8ea07544-83e2-48b2-a4f6-fd9105938da4")
+        );
+    }
+
+    #[test]
+    fn an_identifier_with_no_uri_form_is_left_out() {
+        assert_eq!(identifier("amazon", "B000FBJCK8").uri(), None);
+        assert_eq!(identifier("google", "jACLDwAAQBAJ").uri(), None);
+        // Calibre lets a user invent the scheme, and some of them are nonsense.
+        assert_eq!(identifier("9780007497690", "9780007497690").uri(), None);
+    }
+
+    #[test]
+    fn only_a_web_page_can_be_an_alternate() {
+        assert!(identifier("uri", "https://www.gutenberg.org/ebooks/70652").is_web_page());
+        assert!(identifier("epubbud", "http://www.epubbud.com/epubs/8/E").is_web_page());
+        assert!(!identifier("uri", "urn:uuid:8ea07544-83e2-48b2").is_web_page());
+        assert!(!identifier("isbn", "978-0-7953-2581-6").is_web_page());
+    }
+
+    #[test]
+    fn books_carry_the_page_they_came_from() {
+        let db = library();
+        let books = books_page(&db, 50, 0).expect("books");
+
+        let lovecraft = books.iter().find(|book| book.id == 8).expect("Lovecraft");
+        assert_eq!(
+            lovecraft.alternate.as_deref(),
+            Some("https://www.gutenberg.org/ebooks/70652")
+        );
+        assert_eq!(lovecraft.identifiers.len(), 1);
+
+        let alice = books.iter().find(|book| book.id == 4).expect("Alice");
+        assert!(alice.identifiers.is_empty());
+        assert_eq!(alice.alternate, None);
+    }
+
+    #[test]
+    fn books_and_authors_carry_calibres_sort_keys() {
+        let db = library();
+        let galileo = book(&db, 6).expect("Galileo");
+
+        assert_eq!(galileo.title, "The sidereal messenger of Galileo Galilei");
+        assert_eq!(galileo.sort, "sidereal messenger of Galileo Galilei, The");
+        assert_eq!(galileo.authors[0].name, "Galileo Galilei");
+        assert_eq!(galileo.authors[0].sort, "Galilei, Galileo");
     }
 
     fn formats_of(book: &Book) -> Vec<&str> {

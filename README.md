@@ -68,6 +68,7 @@ public = ["/", "/library"] # the catalog and the whole `library` need no login
 
 [catalog]
 author = "Jorge Luis Borges" # optional (default: "orca")
+landing_page = "landing-page.toml" # optional
 
 [calibre.libraries.library]
 path = "/Volumes/library"
@@ -75,7 +76,29 @@ path = "/Volumes/library"
 [calibre.libraries.nonfiction]
 path = "/Volumes/nonfiction"
 author = "Isaac Newton" # optional (overrides catalog.author)
+landing_page = "nonfiction.toml" # optional (overrides catalog.landing_page)
 ```
+## The landing page
+
+Out of the box, the landing page lists the following sections:
+`books` (All Books), `new` (Recently Added), `authors`, `tags`, `series` and `publishers`.
+
+You can override this by pointing `landing_page` at your own toml file to say which of them you want and in which order.
+The path should be relative to the directory your `orca.toml` is located.
+```toml
+[[section]]
+type = "books"
+
+[[section]]
+type = "tags"
+title = "Genres" # optional: You can rename what the section should be called.
+
+[[section]]
+type = "new"
+```
+
+`type` is the only key a section needs, you can supply a `title` if you would like to rename a section.
+
 ## Authentication
 
 The server supports basic authentication: You can generate a password hash like so:

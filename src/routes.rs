@@ -9,6 +9,8 @@ use crate::authorized::Authorized;
 use crate::appstate::AppState;
 use crate::calibre;
 use crate::config::Config;
+use crate::landing::Kind;
+use crate::opds2::SORT_NEW;
 use crate::shelf::{self, PageLink, Shelf, PER_PAGE};
 
 const ACQUISITION: &str = "acquisition"; // a feed of books
@@ -344,6 +346,20 @@ async fn index(data: web::Data<AppState>, auth: Authorized, req: HttpRequest) ->
     render_template(&data.templates, "index.xml.tera", ctx)
 }
 
+/// One section of the landing page
+#[derive(Serialize)]
+struct Entry {
+    title: String,
+    /// the tail of the entry's urn
+    id: String,
+    href: String,
+    /// only Recently Added has one
+    rel: &'static str,
+    /// `acquisition` for a feed of books, `navigation` for a feed of links
+    kind: &'static str,
+    content: String,
+}
+
 #[actix_web::get("/v1/{lib}")]
 async fn opds(
     data: web::Data<AppState>,
@@ -362,8 +378,29 @@ async fn opds(
         Err(e) => return server_error("Error counting the library", e),
     };
 
+    let root = root_of(&req, data.config, &lib);
+    let sections: Vec<Entry> = data
+        .landing(&lib)
+        .visible(&counts)
+        .iter()
+        .map(|section| Entry {
+            title: section.title.clone(),
+            id: section.feed().to_string(),
+            href: format!("{}/{}", root, section.feed()),
+            rel: match section.kind {
+                Kind::New => SORT_NEW,
+                _ => "",
+            },
+            kind: match section.kind.is_shelf() {
+                true => ACQUISITION,
+                false => NAVIGATION,
+            },
+            content: section.description(&counts),
+        })
+        .collect();
+
     let mut ctx = feed_ctx(&req, data.config, Some(&lib));
-    ctx.insert("counts", &counts);
+    ctx.insert("sections", &sections);
     ctx.insert("updated", &calibre::updated(&db));
     render_template(&data.templates, "opds.xml.tera", ctx)
 }

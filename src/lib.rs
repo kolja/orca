@@ -5,6 +5,7 @@ pub mod authdoc;
 pub mod authorized;
 pub mod calibre;
 pub mod config;
+pub mod landing;
 pub mod tls;
 pub mod hash;
 pub mod opds2;
@@ -20,11 +21,12 @@ use actix_web::{web, App, HttpServer};
 use anyhow::{anyhow, Result};
 use rusqlite::{Connection, OpenFlags};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tera::{Kwargs, State, Tera};
 
 use config::{Config, Protocol};
+use landing::Landing;
 use templates::Template;
 use routes::{health, all_series, authentication, authors, book_file, books_by_author, books_by_publisher, books_by_tag, books_in_series, cover, catalog_moved, feed_moved, getbooks, index, library_moved, logo, opds, opensearch, publishers, recently_added, search, tags};
 use appstate::AppState;
@@ -94,6 +96,33 @@ fn check_authentication(config: &Config) -> Result<()> {
     Ok(())
 }
 
+/// the server won't start if a page does not parse.
+fn landing_pages(config: &'static Config) -> Result<HashMap<String, Arc<Landing>>> {
+    let mut pages = HashMap::new();
+    // one file shared by several libraries is read once
+    let mut read: HashMap<PathBuf, Arc<Landing>> = HashMap::new();
+
+    for library in config.calibre.libraries.keys() {
+        let Some(path) = config.landing_page(library) else {
+            continue;
+        };
+
+        let page = match read.get(&path) {
+            Some(page) => page.clone(),
+            None => {
+                let page = Arc::new(Landing::read(&path)
+                    .map_err(|e| anyhow!("library '{}': {}", library, e))?);
+                read.insert(path, page.clone());
+                page
+            }
+        };
+
+        pages.insert(library.clone(), page);
+    }
+
+    Ok(pages)
+}
+
 pub fn create_app(config: &'static Config) -> Result<AppState> {
 
     if config.calibre.libraries.is_empty() {
@@ -139,6 +168,7 @@ pub fn create_app(config: &'static Config) -> Result<AppState> {
         templates: tera,
         config,
         db: db_map,
+        pages: landing_pages(config)?,
     })
 }
 
@@ -257,7 +287,11 @@ mod tests {
         libraries: &[(&str, &str)],
         authentication: Option<Authentication>,
     ) -> &'static Config {
-        Box::leak(Box::new(Config {
+        Box::leak(Box::new(config_of(libraries, authentication)))
+    }
+
+    fn config_of(libraries: &[(&str, &str)], authentication: Option<Authentication>) -> Config {
+        Config {
             server: Server {
                 ip: "127.0.0.1".to_string(),
                 port: 8080,
@@ -271,13 +305,21 @@ mod tests {
                     .map(|(name, path)| {
                         (
                             name.to_string(),
-                            Library { path: path.to_string(), author: None },
+                            Library { path: path.to_string(), author: None, landing_page: None },
                         )
                     })
                     .collect(),
             },
             catalog: Catalog::default(),
-        }))
+            dir: PathBuf::new(),
+        }
+    }
+
+    fn landing_config(page: &str, dir: &Path) -> &'static Config {
+        let mut config = config_of(&[("library", "tests/calibre")], None);
+        config.dir = dir.to_path_buf();
+        config.catalog.landing_page = Some(page.to_string());
+        Box::leak(Box::new(config))
     }
 
     // `expect_err` is unavailable here: it needs `AppState: Debug`, which would
@@ -354,6 +396,57 @@ mod tests {
             );
             assert!(err.contains(&format!("library '{}': the name is reserved", name)), "{}", err);
         }
+    }
+
+    fn full() -> calibre::Counts {
+        calibre::Counts { books: 7, authors: 4, tags: 7, series: 1, publishers: 2 }
+    }
+
+    #[test]
+    fn a_library_naming_no_landing_page_is_served_the_built_in_one() {
+        let state = create_app(config_for(&[("library", "tests/calibre")])).unwrap();
+
+        assert!(state.pages.is_empty());
+        assert_eq!(state.landing("library").visible(&full()).len(), 6);
+    }
+
+    #[test]
+    fn a_library_is_served_the_landing_page_its_config_names() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("page.toml"), "[[section]]\ntype = \"tags\"\ntitle = \"Genres\"\n")
+            .unwrap();
+
+        let state = create_app(landing_config("page.toml", dir.path())).unwrap();
+        let shown = state.landing("library").visible(&full());
+
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].title, "Genres");
+    }
+
+    #[test]
+    fn a_landing_page_that_does_not_parse_refuses_to_start() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("page.toml"), "[[section]]\ntype = \"shelves\"\n").unwrap();
+
+        let err = refusal(
+            create_app(landing_config("page.toml", dir.path())),
+            "a landing page that does not parse must not start a server",
+        );
+
+        assert!(err.contains("library 'library': landing page"), "{}", err);
+        assert!(err.contains("unknown variant `shelves`"), "{}", err);
+    }
+
+    #[test]
+    fn a_landing_page_that_is_not_there_refuses_to_start() {
+        let dir = TempDir::new().unwrap();
+
+        let err = refusal(
+            create_app(landing_config("nowhere.toml", dir.path())),
+            "a landing page that is not there must not start a server",
+        );
+
+        assert!(err.contains("nowhere.toml"), "{}", err);
     }
 
     fn authentication(logins: &[&str], public: &[&str]) -> Authentication {

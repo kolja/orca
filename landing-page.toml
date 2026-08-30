@@ -1,0 +1,39 @@
+# This is the config of the default landing page that Orca serves,
+# it gets compiled into the binary.
+#
+# You can provide your own if you would like to override it like this:
+# In your 'orca.conf':
+#
+#     [catalog]
+#     landing_page = "landing-page.toml"
+#
+# you can also have one per library, which wins over the catalog-wide one:
+#
+#     [calibre.libraries.fiction]
+#     path = "/mnt/fiction"
+#     landing_page = "landing-fiction.toml"
+#
+# The path should be relative to the directory your config file was found in.
+#
+# Every section needs a `type` which can be one of one of
+# `books`, `new`, `authors`, `tags`, `series` and `publishers`.
+# They will appear in the order as listed here.
+
+
+[[section]]
+type = "books"
+
+[[section]]
+type = "new"
+
+[[section]]
+type = "authors"
+
+[[section]]
+type = "tags"
+
+[[section]]
+type = "series"
+
+[[section]]
+type = "publishers"

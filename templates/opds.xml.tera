@@ -1,60 +1,14 @@
 {% extends "layout.xml.tera" %}
 {% block content %}
   <title>{{ lib }}</title>
+{%- for section in sections %}
 
   <entry>
-    <title>All Books</title>
-    <id>urn:orca:{{ lib }}:books</id>
-    <link href="{{ catalog }}/{{ lib }}/books" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
+    <title>{{ section.title }}</title>
+    <id>urn:orca:{{ lib }}:{{ section.id }}</id>
+    <link href="{{ section.href }}"{% if section.rel %} rel="{{ section.rel }}"{% endif %} type="application/atom+xml;profile=opds-catalog;kind={{ section.kind }}"/>
     <updated>{{ updated }}</updated>
-    <content type="text">All {{ counts.books }} books, by title</content>
+    <content type="text">{{ section.content }}</content>
   </entry>
-
-  <entry>
-    <title>Recently Added</title>
-    <id>urn:orca:{{ lib }}:new</id>
-    <link href="{{ catalog }}/{{ lib }}/new" rel="http://opds-spec.org/sort/new" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">The newest additions to the library</content>
-  </entry>
-  {%- if counts.authors > 0 %}
-
-  <entry>
-    <title>Authors</title>
-    <id>urn:orca:{{ lib }}:authors</id>
-    <link href="{{ catalog }}/{{ lib }}/authors" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">{{ counts.authors }} authors</content>
-  </entry>
-  {%- endif %}
-  {%- if counts.tags > 0 %}
-
-  <entry>
-    <title>Tags</title>
-    <id>urn:orca:{{ lib }}:tags</id>
-    <link href="{{ catalog }}/{{ lib }}/tags" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">{{ counts.tags }} tags</content>
-  </entry>
-  {%- endif %}
-  {%- if counts.series > 0 %}
-
-  <entry>
-    <title>Series</title>
-    <id>urn:orca:{{ lib }}:series</id>
-    <link href="{{ catalog }}/{{ lib }}/series" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">{{ counts.series }} series</content>
-  </entry>
-  {%- endif %}
-  {%- if counts.publishers > 0 %}
-
-  <entry>
-    <title>Publishers</title>
-    <id>urn:orca:{{ lib }}:publishers</id>
-    <link href="{{ catalog }}/{{ lib }}/publishers" type="application/atom+xml;profile=opds-catalog;kind=navigation"/>
-    <updated>{{ updated }}</updated>
-    <content type="text">{{ counts.publishers }} publishers</content>
-  </entry>
-  {%- endif %}
+{%- endfor %}
 {% endblock content %}

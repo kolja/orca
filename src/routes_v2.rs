@@ -16,6 +16,7 @@ use crate::appstate::AppState;
 use crate::authorized::Authorized;
 use crate::calibre::{self, Book, Identifier};
 use crate::config::CATALOG;
+use crate::landing::Kind;
 use crate::opds2::{
     BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
     BOOK, FEED, IMAGE, PUBLICATION, SEARCH, SORT_NEW,
@@ -240,35 +241,26 @@ async fn library_root(
 
     let base = origin(&req, data.config);
     let root = root_of(&base, &lib);
-    let browse = |feed: &str, title: &str, count: usize| {
-        Link::new(page_url(&root, feed, 1))
-            .rel("subsection")
-            .mime(FEED)
-            .title(title.to_string())
-            .count(count)
-    };
 
-    let mut navigation = vec![
-        browse(Shelf::Everything.feed(), "All Books", counts.books),
-        Link::new(format!("{}/v2/{}/new", base, lib))
-            .rel(SORT_NEW)
-            .mime(FEED)
-            .title("Recently Added"),
-    ];
+    let navigation: Vec<Link> = data
+        .landing(&lib)
+        .visible(&counts)
+        .iter()
+        .map(|section| {
+            let link = Link::new(page_url(&root, section.feed(), 1))
+                .rel(match section.kind {
+                    Kind::New => SORT_NEW,
+                    _ => "subsection",
+                })
+                .mime(FEED)
+                .title(section.title.clone());
 
-    // A library nobody has tagged should not offer a way in that leads nowhere.
-    if counts.authors > 0 {
-        navigation.push(browse(feed_of(Shelf::Author), "Authors", counts.authors));
-    }
-    if counts.tags > 0 {
-        navigation.push(browse(feed_of(Shelf::Tag), "Tags", counts.tags));
-    }
-    if counts.series > 0 {
-        navigation.push(browse(feed_of(Shelf::Series), "Series", counts.series));
-    }
-    if counts.publishers > 0 {
-        navigation.push(browse(feed_of(Shelf::Publisher), "Publishers", counts.publishers));
-    }
+            match section.total(&counts) {
+                Some(total) => link.count(total),
+                None => link,
+            }
+        })
+        .collect();
 
     let root = library_feed(lib.clone(), format!("{}/v2/{}", base, lib), &base, &lib)
         .modified(calibre::updated(&db))

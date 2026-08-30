@@ -2,6 +2,9 @@
 
 ## 0.2.2
 
+The library root is a landing page now and can be configured.
+See the `README.md` and `landing_page.toml` for details.
+
 `/` now redirects to `/v1` (also a reserved route now) for the Atom feed.
 Covers and downloads remain unversioned under `/{lib}/cover/{id}` and `/{lib}/file/{id}/{format}`
 Trailing or a doubled slashes are normalized.

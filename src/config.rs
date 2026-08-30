@@ -1,6 +1,7 @@
 
 use dirs::home_dir;
 use std::{env, fmt, fs, collections::HashMap};
+use std::path::{Path, PathBuf};
 use serde_derive::{Deserialize, Serialize};
 use crate::public::Rule;
 
@@ -17,6 +18,10 @@ pub struct Config {
     pub calibre: Calibre,
     #[serde(default)]
     pub catalog: Catalog,
+    /// The directory this config was read from,
+    /// relative paths resolves against thir. Filled in after the parse.
+    #[serde(skip)]
+    pub dir: PathBuf,
 }
 
 impl Config {
@@ -24,6 +29,17 @@ impl Config {
         lib.and_then(|lib| self.calibre.libraries.get(lib))
             .and_then(|lib| lib.author.as_deref())
             .unwrap_or(&self.catalog.author)
+    }
+
+    /// The landing page one library is served with:
+    /// its own if it names one, otherwise the catalog's, or none and Orca serves the built-in.
+    /// A relative path is relative to the config file directory
+    pub fn landing_page(&self, lib: &str) -> Option<PathBuf> {
+        let named = self.calibre.libraries.get(lib)
+            .and_then(|lib| lib.landing_page.as_deref())
+            .or(self.catalog.landing_page.as_deref())?;
+
+        Some(self.dir.join(named))
     }
 
     /// libraries that are exempt from requiring credentials.
@@ -80,10 +96,14 @@ pub struct Calibre {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Library {
     pub path: String,
     #[serde(default)]
     pub author: Option<String>,
+    /// wins over the one under [catalog]
+    #[serde(default)]
+    pub landing_page: Option<String>,
 }
 
 /// the name of the catalog / title of its root feed
@@ -91,9 +111,13 @@ pub const CATALOG: &str = "ORCA";
 
 /// How the catalog presents itself, as opposed to where its books live.
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
 pub struct Catalog {
     #[serde(default = "orca")]
     pub author: String,
+    /// what every library's root offers, unless the library names its own
+    #[serde(default)]
+    pub landing_page: Option<String>,
 }
 
 fn orca() -> String {
@@ -102,7 +126,7 @@ fn orca() -> String {
 
 impl Default for Catalog {
     fn default() -> Self {
-        Catalog { author: orca() }
+        Catalog { author: orca(), landing_page: None }
     }
 }
 
@@ -162,8 +186,11 @@ pub fn read_config(config_file: &str) -> Result<Config, Error> {
 
     let contents = fs::read_to_string(config_file)
         .context("failed to read config file")?;
-    let config = toml::from_str(&contents)
+    let mut config: Config = toml::from_str(&contents)
         .map_err(|err| anyhow!(err))?;
+
+    config.dir = Path::new(config_file).parent().unwrap_or(Path::new("")).to_path_buf();
+
     Ok(config)
 }
 
@@ -420,6 +447,43 @@ mod tests {
             let err = refusal(&broken, "an entry naming no library must not parse");
             assert!(err.contains("public = "), "{}: {}", entry, err);
         }
+    }
+
+    #[test]
+    fn a_landing_page_is_found_beside_the_config_that_names_it() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config_file = dir.path().join("orca.toml");
+        fs::write(
+            &config_file,
+            format!("{}\n[catalog]\nlanding_page = \"landing.toml\"\n", VALID),
+        )
+        .unwrap();
+
+        let config = read_config(config_file.to_str().unwrap()).unwrap();
+
+        assert_eq!(config.landing_page("library"), Some(dir.path().join("landing.toml")));
+    }
+
+    // Same shape as `author`
+    #[test]
+    fn a_library_may_name_a_landing_page_of_its_own() {
+        let written = format!(
+            "{}\nlanding_page = \"just-this-one.toml\"\n[catalog]\nlanding_page = \"everyone.toml\"\n",
+            VALID
+        );
+        let named = config_file(&written);
+
+        let config = read_config(named.path().to_str().unwrap()).unwrap();
+        let page = config.landing_page("library").unwrap();
+
+        assert_eq!(page.file_name().unwrap(), "just-this-one.toml");
+    }
+
+    #[test]
+    fn a_config_naming_no_landing_page_names_none() {
+        let plain = config_file(VALID);
+
+        assert!(read_config(plain.path().to_str().unwrap()).unwrap().landing_page("library").is_none());
     }
 
     #[test]

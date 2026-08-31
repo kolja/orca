@@ -27,6 +27,10 @@ static TEST_HTTP_CONFIG: Lazy<Config> =
 static TEST_HTTPS_CONFIG: Lazy<Config> =
     Lazy::new(|| read_config("tests/orca.https.test.toml").expect("Failed to read test config"));
 
+/// One library, served with a landing page of named shelves and no login
+static SHELVES_CONFIG: Lazy<Config> =
+    Lazy::new(|| read_config("tests/orca.shelves.test.toml").expect("Failed to read test config"));
+
 // ------- The feeds -------
 
 // One library: the root is a redirect, the same as the OPDS 1.2 root.
@@ -734,6 +738,82 @@ async fn each_version_answers_under_its_own_prefix() {
         bare.headers().get(header::LOCATION).unwrap(),
         "http://localhost:8080/v1/library/books"
     );
+}
+
+// ------- A landing page with named shelves on it -------
+
+#[test]
+async fn a_landing_page_offers_the_sections_it_names() {
+    let app = setup(&SHELVES_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    validates(&library, FEED);
+    // "Cookery" is left out: no book in the library carries the tag.
+    assert_eq!(
+        titles(&library["navigation"]),
+        ["All Books", "Scifi & Fantasy", "Cosmic Horror", "New Arrivals in Fiction", "Genres"]
+    );
+    assert_eq!(
+        library["navigation"][1]["href"],
+        "http://localhost:8080/v2/library/shelves/scifi"
+    );
+}
+
+// A count of a filtered shelf costs a query of its own, and `numberOfItems` is optional
+#[test]
+async fn a_filtered_section_is_offered_without_counting_it() {
+    let app = setup(&SHELVES_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    assert_eq!(library["navigation"][0]["properties"]["numberOfItems"], 7);
+    assert!(library["navigation"][1]["properties"].is_null());
+
+    let scifi = feed(&app, "/v2/library/shelves/scifi").await;
+    assert_eq!(scifi["metadata"]["numberOfItems"], 5);
+}
+
+#[test]
+async fn a_named_shelf_is_a_feed_of_its_own() {
+    let app = setup(&SHELVES_CONFIG).await;
+
+    let scifi = feed(&app, "/v2/library/shelves/scifi").await;
+    validates(&scifi, FEED);
+    assert_eq!(scifi["metadata"]["title"], "library | Scifi & Fantasy");
+    assert_eq!(scifi["publications"].as_array().unwrap().len(), 5);
+
+    let horror = feed(&app, "/v2/library/shelves/cosmic-horror").await;
+    validates(&horror, FEED);
+    assert_eq!(horror["publications"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+async fn a_filtered_new_section_is_capped_and_unpaged() {
+    let app = setup(&SHELVES_CONFIG).await;
+    let fresh = feed(&app, "/v2/library/shelves/fresh-fiction").await;
+
+    validates(&fresh, FEED);
+    assert_eq!(fresh["publications"].as_array().unwrap().len(), 2);
+    assert!(fresh["metadata"]["numberOfItems"].is_null());
+}
+
+#[test]
+async fn a_named_shelf_that_matches_nothing_is_an_empty_feed_and_not_a_404() {
+    let app = setup(&SHELVES_CONFIG).await;
+    let empty = feed(&app, "/v2/library/shelves/chess").await;
+
+    validates(&empty, FEED);
+    assert_eq!(empty["metadata"]["numberOfItems"], 0);
+}
+
+#[test]
+async fn a_slug_no_landing_page_defines_is_not_found() {
+    let app = setup(&SHELVES_CONFIG).await;
+    let response = call_authorized(&app, "/v2/library/shelves/nonesuch").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let plain = setup(&TEST_HTTP_CONFIG).await;
+    let response = call_authorized(&plain, "/v2/library/shelves/scifi").await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 // ------- Helper Functions -------

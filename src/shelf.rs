@@ -11,6 +11,16 @@ use crate::calibre::{self, Book};
 /// How many books one page of a feed holds.
 pub const PER_PAGE: usize = 50;
 
+/// A shelf from a custom landing page, filtered by tags.
+/// its name is read from the config (not coming from Calibre).
+pub struct Named {
+    pub slug: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    /// all of the tags rather than any of them
+    pub all: bool,
+}
+
 /// a `Shelf` carries no books. Its a query.
 pub enum Shelf {
     Everything,
@@ -20,6 +30,7 @@ pub enum Shelf {
     Publisher(i32),
     /// a term nothing matches is an empty shelf, not a 404.
     Search(String),
+    Named(Named),
 }
 
 impl Shelf {
@@ -31,6 +42,7 @@ impl Shelf {
             Shelf::Series(_) => "series",
             Shelf::Publisher(_) => "publishers",
             Shelf::Search(_) => "search",
+            Shelf::Named(_) => "shelves",
         }
     }
 
@@ -42,6 +54,7 @@ impl Shelf {
             Shelf::Series(_) => "series",
             Shelf::Publisher(_) => "publisher",
             Shelf::Search(_) => "search",
+            Shelf::Named(_) => "shelf",
         }
     }
 
@@ -54,6 +67,8 @@ impl Shelf {
             // The term is part of the address, so every page of a search finds
             // its way back to the same books.
             Shelf::Search(term) => format!("{}?query={}", self.feed(), encoded(term)),
+            // The slug is written in the config and needs no escaping.
+            Shelf::Named(named) => format!("{}/{}", self.feed(), named.slug),
         }
     }
 
@@ -69,6 +84,7 @@ impl Shelf {
                 "" => "Search".to_string(),
                 term => format!("Search: {}", term),
             }),
+            Shelf::Named(named) => Ok(named.title.clone()),
         }
     }
 
@@ -81,6 +97,7 @@ impl Shelf {
             Shelf::Publisher(id) => calibre::count_books_by_publisher(db, *id),
             Shelf::Search(term) if term.trim().is_empty() => Ok(0),
             Shelf::Search(term) => calibre::count_books_matching(db, term.trim()),
+            Shelf::Named(named) => calibre::count_books_tagged(db, &named.tags, named.all),
         }
     }
 
@@ -101,6 +118,9 @@ impl Shelf {
             // Nothing typed is nothing found: a bare `%%` would be the whole library.
             Shelf::Search(term) if term.trim().is_empty() => Ok(Vec::new()),
             Shelf::Search(term) => calibre::books_search_page(db, term.trim(), limit, offset),
+            Shelf::Named(named) => {
+                calibre::books_tagged_page(db, &named.tags, named.all, limit, offset)
+            }
         }
     }
 }

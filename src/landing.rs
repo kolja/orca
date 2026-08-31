@@ -15,7 +15,18 @@ use once_cell::sync::Lazy;
 use serde::de::{self, Deserializer};
 use serde_derive::Deserialize;
 
-use crate::calibre::Counts;
+use rusqlite::Connection;
+
+use crate::calibre::{self, Counts};
+use crate::shelf::{Named, Shelf};
+
+/// SQLite's `NOCASE` folds ASCII and nothing else, so this has to fold the same
+/// way: matching Unicode here would drop a tag the database still tells apart.
+fn deduplicated(tags: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+
+    tags.into_iter().filter(|tag| seen.insert(tag.to_ascii_lowercase())).collect()
+}
 
 const DEFAULT: &str = include_str!("../landing-page.toml");
 
@@ -161,33 +172,58 @@ impl Section {
             }
         }
 
-        // todo: Until named shelves exist there is nowhere for a filtered section to lead
-        if filtered {
-            return Err(anyhow!(
-                "section \"{}\": tags_any and tags_all are not served yet -- the named shelf \
-                 they would lead to does not exist in this version.",
-                named
-            ));
-        }
-
         Ok(Section {
             kind: written.kind,
             title: named,
             id: written.id,
-            tags_any: written.tags_any,
-            tags_all: written.tags_all,
+            tags_any: deduplicated(written.tags_any),
+            tags_all: deduplicated(written.tags_all),
             inline: written.inline,
             shown: written.count.unwrap_or(BOOKS_SHOWN),
         })
     }
 
+    /// are we talking about some of the library or all of it?
+    pub fn filtered(&self) -> bool {
+        !self.tags_any.is_empty() || !self.tags_all.is_empty()
+    }
+
+    /// The tags a book has to carry, and whether it needs every one of them.
+    pub fn tags(&self) -> (&[String], bool) {
+        match self.tags_all.is_empty() {
+            true => (&self.tags_any, false),
+            false => (&self.tags_all, true),
+        }
+    }
+
+    pub fn shelf(&self) -> Option<Shelf> {
+        let (tags, all) = self.tags();
+
+        match &self.id {
+            Some(slug) if self.filtered() => Some(Shelf::Named(Named {
+                slug: slug.clone(),
+                title: self.title.clone(),
+                tags: tags.to_vec(),
+                all,
+            })),
+            _ => None,
+        }
+    }
+
     /// Where this section leads, below `/{lib}`.
-    pub fn feed(&self) -> &str {
-        self.kind.feed()
+    pub fn feed(&self) -> String {
+        match self.filtered() {
+            true => format!("shelves/{}", self.id.as_deref().unwrap_or_default()),
+            false => self.kind.feed().to_string(),
+        }
     }
 
     /// How many things this section leads to
     pub fn total(&self, counts: &Counts) -> Option<usize> {
+        if self.filtered() {
+            return None;
+        }
+
         match self.kind {
             Kind::Books => Some(counts.books),
             Kind::New => None,
@@ -198,11 +234,30 @@ impl Section {
         }
     }
 
-    pub fn visible(&self, counts: &Counts) -> bool {
-        self.kind.is_shelf() || self.total(counts).is_some_and(|total| total > 0)
+    /// Whether this section is offered at all
+    pub fn visible(&self, db: &Connection, counts: &Counts) -> rusqlite::Result<bool> {
+        if self.filtered() {
+            let (tags, all) = self.tags();
+            return calibre::any_books_tagged(db, tags, all);
+        }
+
+        Ok(self.kind.is_shelf() || self.total(counts).is_some_and(|total| total > 0))
     }
 
     pub fn description(&self, counts: &Counts) -> String {
+        if self.filtered() {
+            let (tags, all) = self.tags();
+            let joined = tags.join(match all {
+                true => " and ",
+                false => " or ",
+            });
+
+            return match self.kind {
+                Kind::New => format!("The newest books tagged {}", joined),
+                _ => format!("Books tagged {}", joined),
+            };
+        }
+
         match self.kind {
             Kind::Books => format!("All {} books, by title", counts.books),
             Kind::New => "The newest additions to the library".to_string(),
@@ -262,16 +317,28 @@ impl Landing {
         Landing::parse(&source).map_err(|err| named(&err))
     }
 
-    pub fn visible(&self, counts: &Counts) -> Vec<&Section> {
+    /// The section `/{lib}/shelves/{slug}`
+    /// the same address is a 404 in a library that doesn't define it.
+    pub fn shelf(&self, slug: &str) -> Option<&Section> {
+        self.sections
+            .iter()
+            .find(|section| section.filtered() && section.id.as_deref() == Some(slug))
+    }
+
+    pub fn visible(&self, db: &Connection, counts: &Counts) -> rusqlite::Result<Vec<&Section>> {
         static ALL_BOOKS: Lazy<Section> = Lazy::new(|| Section::of(Kind::Books));
 
-        let shown: Vec<&Section> =
-            self.sections.iter().filter(|section| section.visible(counts)).collect();
+        let mut shown = Vec::new();
+        for section in &self.sections {
+            if section.visible(db, counts)? {
+                shown.push(section);
+            }
+        }
 
-        match shown.is_empty() {
+        Ok(match shown.is_empty() {
             true => vec![&ALL_BOOKS],
             false => shown,
-        }
+        })
     }
 
     #[cfg(test)]
@@ -296,6 +363,19 @@ mod tests {
         Counts { books, authors, tags, series, publishers }
     }
 
+    /// The fixture library
+    fn library() -> Connection {
+        Connection::open("tests/calibre/metadata.db").expect("test library")
+    }
+
+    fn shown(page: &Landing, counts: &Counts) -> Vec<String> {
+        page.visible(&library(), counts)
+            .expect("a landing page")
+            .iter()
+            .map(|section| section.title.clone())
+            .collect()
+    }
+
     fn refusal(source: &str, why: &str) -> String {
         match Landing::parse(source) {
             Ok(_) => panic!("{}", why),
@@ -312,34 +392,23 @@ mod tests {
             [Kind::Books, Kind::New, Kind::Authors, Kind::Tags, Kind::Series, Kind::Publishers]
         );
 
-        let full = counts(918, 300, 12, 40, 8);
-        let titles: Vec<&str> =
-            page.visible(&full).iter().map(|section| section.title.as_str()).collect();
-        assert_eq!(titles, ["All Books", "Recently Added", "Authors", "Tags", "Series", "Publishers"]);
+        assert_eq!(
+            shown(page, &counts(918, 300, 12, 40, 8)),
+            ["All Books", "Recently Added", "Authors", "Tags", "Series", "Publishers"]
+        );
     }
 
     #[test]
     fn a_signpost_pointing_at_nothing_is_left_off_the_page() {
-        let bare = counts(4, 0, 0, 0, 0);
-        let titles: Vec<&str> = default_page()
-            .visible(&bare)
-            .iter()
-            .map(|section| section.title.as_str())
-            .collect();
-
         // The books are still offered, empty library or not.
-        assert_eq!(titles, ["All Books", "Recently Added"]);
+        assert_eq!(shown(default_page(), &counts(4, 0, 0, 0, 0)), ["All Books", "Recently Added"]);
     }
 
     #[test]
     fn a_page_where_everything_was_suppressed_still_leads_to_the_books() {
         let page = Landing::parse("[[section]]\ntype = \"tags\"\n").unwrap();
-        let empty = counts(0, 0, 0, 0, 0);
 
-        let shown = page.visible(&empty);
-        assert_eq!(shown.len(), 1);
-        assert_eq!(shown[0].kind, Kind::Books);
-        assert_eq!(shown[0].title, "All Books");
+        assert_eq!(shown(&page, &counts(0, 0, 0, 0, 0)), ["All Books"]);
     }
 
     #[test]
@@ -350,7 +419,8 @@ mod tests {
         .unwrap();
 
         let full = counts(10, 2, 3, 4, 5);
-        let shown = page.visible(&full);
+        let db = library();
+        let shown = page.visible(&db, &full).unwrap();
 
         assert_eq!(shown[0].title, "Genres");
         assert_eq!(shown[1].title, "Series");
@@ -363,7 +433,8 @@ mod tests {
     fn renaming_a_section_leaves_the_feed_it_leads_to_where_it_was() {
         let page = Landing::parse("[[section]]\ntype = \"tags\"\ntitle = \"Genres\"\n").unwrap();
 
-        assert_eq!(page.visible(&counts(1, 0, 7, 0, 0))[0].feed(), "tags");
+        let db = library();
+        assert_eq!(page.visible(&db, &counts(1, 0, 7, 0, 0)).unwrap()[0].feed(), "tags");
     }
 
     #[test]
@@ -456,14 +527,92 @@ mod tests {
         assert!(Landing::parse("[[section]]\ntype = \"new\"\ninline = true\ncount = 2\n").is_ok());
     }
 
-    // todo: Named shelves. Until they are there, a filtered section would lead to a 404.
+    fn one(source: &str) -> Landing {
+        Landing::parse(source).expect("a landing page")
+    }
+
+    // A filtered section leads to an address of its own, and the slug is not derived from the title.
     #[test]
-    fn a_filter_is_refused_while_there_is_nowhere_for_it_to_lead() {
-        let err = refusal(
-            "[[section]]\nid = \"scifi\"\ntype = \"books\"\ntags_any = [\"science fiction\"]\n",
-            "a filter must not parse before the shelf it points at exists",
+    fn a_filtered_section_lives_under_the_slug_it_was_given() {
+        let page = one(
+            "[[section]]\nid = \"scifi\"\ntitle = \"Scifi & Fantasy\"\ntype = \"books\"\n\
+             tags_any = [\"science fiction\", \"fantasy\"]\n",
+        );
+        let section = page.shelf("scifi").expect("a shelf under its slug");
+
+        assert_eq!(section.feed(), "shelves/scifi");
+        assert_eq!(section.tags(), (["science fiction".to_string(), "fantasy".to_string()].as_slice(), false));
+
+        let shelf = section.shelf().expect("a filtered section is a shelf");
+        assert_eq!(shelf.path(), "shelves/scifi");
+        assert_eq!(shelf.feed(), "shelves");
+        assert_eq!(shelf.name(&library()).unwrap(), "Scifi & Fantasy");
+    }
+
+    #[test]
+    fn tags_all_asks_for_every_one_of_them() {
+        let page = one(
+            "[[section]]\nid = \"both\"\ntype = \"books\"\ntags_all = [\"magazine\", \"politics\"]\n",
+        );
+        let section = page.shelf("both").unwrap();
+
+        assert!(section.tags().1, "tags_all wants every one of them");
+    }
+
+    // Only a filtered section has an address of its own
+    #[test]
+    fn a_section_that_filters_nothing_is_no_named_shelf() {
+        let page = one("[[section]]\ntype = \"books\"\n\n[[section]]\ntype = \"tags\"\n");
+
+        assert!(page.shelf("books").is_none());
+        assert_eq!(page.visible(&library(), &counts(7, 8, 7, 1, 3)).unwrap()[0].feed(), "books");
+    }
+
+    #[test]
+    fn a_tag_written_twice_is_asked_for_once() {
+        let page = one(
+            "[[section]]\nid = \"sf\"\ntype = \"books\"\n\
+             tags_all = [\"Science Fiction\", \"science fiction\"]\n",
         );
 
-        assert!(err.contains("not served yet"), "{}", err);
+        assert_eq!(page.shelf("sf").unwrap().tags().0, ["Science Fiction".to_string()]);
+    }
+
+    // The blurb of a filtered section cannot quote a number. It says which books it holds instead.
+    #[test]
+    fn a_filtered_section_describes_itself_by_its_tags() {
+        let full = counts(7, 8, 7, 1, 3);
+
+        let any = one("[[section]]\nid = \"sf\"\ntype = \"books\"\ntags_any = [\"scifi\", \"fantasy\"]\n");
+        assert_eq!(any.shelf("sf").unwrap().description(&full), "Books tagged scifi or fantasy");
+
+        let all = one("[[section]]\nid = \"x\"\ntype = \"books\"\ntags_all = [\"scifi\", \"horror\"]\n");
+        assert_eq!(all.shelf("x").unwrap().description(&full), "Books tagged scifi and horror");
+
+        let new = one("[[section]]\nid = \"n\"\ntype = \"new\"\ntags_any = [\"magazine\"]\n");
+        assert_eq!(new.shelf("n").unwrap().description(&full), "The newest books tagged magazine");
+    }
+
+    #[test]
+    fn a_filtered_section_is_offered_without_being_counted() {
+        let page = one("[[section]]\nid = \"sf\"\ntype = \"books\"\ntags_any = [\"science fiction\"]\n");
+        let section = page.shelf("sf").unwrap();
+        let db = library();
+
+        assert_eq!(section.total(&counts(7, 8, 7, 1, 3)), None);
+        assert!(section.visible(&db, &counts(7, 8, 7, 1, 3)).unwrap());
+    }
+
+    #[test]
+    fn a_filtered_section_no_book_matches_is_left_off_the_page() {
+        let page = one(
+            "[[section]]\ntype = \"books\"\n\n\
+             [[section]]\nid = \"cookery\"\ntitle = \"Cookery\"\ntype = \"books\"\n\
+             tags_any = [\"cooking\"]\n",
+        );
+
+        assert_eq!(shown(&page, &counts(7, 8, 7, 1, 3)), ["All Books"]);
+        // the shelf is there but it answers with an empty feed.
+        assert!(page.shelf("cookery").is_some());
     }
 }

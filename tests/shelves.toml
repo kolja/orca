@@ -1,0 +1,35 @@
+# Written against the tags in `tests/calibre`
+
+[[section]]
+type = "books"
+
+# "Science Fiction" is spelled differently here than in the library on purpose:
+# Calibre declares tags.name COLLATE NOCASE, so the spelling should not matter.
+[[section]]
+id = "scifi"
+title = "Scifi & Fantasy"
+type = "books"
+tags_any = ["Science Fiction", "fantasy"]
+
+[[section]]
+id = "cosmic-horror"
+title = "Cosmic Horror"
+type = "books"
+tags_all = ["science fiction", "horror"]
+
+[[section]]
+id = "fresh-fiction"
+title = "New Arrivals in Fiction"
+type = "new"
+tags_any = ["fiction"]
+
+# No book in the library carries this tag, so the section is not offered.
+[[section]]
+id = "chess"
+title = "Chess"
+type = "books"
+tags_any = ["chess"]
+
+[[section]]
+type = "tags"
+title = "Genres"

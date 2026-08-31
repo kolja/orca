@@ -5,6 +5,10 @@
 The library root is a landing page now and can be configured.
 See the `README.md` and `landing_page.toml` for details.
 
+A `books` or `new` section can be narrowed to the books carrying certain tags,
+with `tags_any` or `tags_all`. Such a section needs an `id` and is served at
+`/{lib}/shelves/{id}`, in both feed formats.
+
 `/` now redirects to `/v1` (also a reserved route now) for the Atom feed.
 Covers and downloads remain unversioned under `/{lib}/cover/{id}` and `/{lib}/file/{id}/{format}`
 Trailing or a doubled slashes are normalized.

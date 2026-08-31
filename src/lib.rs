@@ -28,7 +28,7 @@ use tera::{Kwargs, State, Tera};
 use config::{Config, Protocol};
 use landing::Landing;
 use templates::Template;
-use routes::{health, all_series, authentication, authors, book_file, books_by_author, books_by_publisher, books_by_tag, books_in_series, cover, catalog_moved, feed_moved, getbooks, index, library_moved, logo, opds, opensearch, publishers, recently_added, search, tags};
+use routes::{health, all_series, authentication, authors, book_file, books_by_author, books_by_publisher, books_by_tag, books_in_series, cover, catalog_moved, feed_moved, getbooks, index, library_moved, logo, named_shelf, opds, opensearch, publishers, recently_added, search, tags};
 use appstate::AppState;
 
 // Tera filter to convert format to mime type -- OPDS v2 links can use it too.
@@ -241,6 +241,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(routes_v2::books_by_tag);
     cfg.service(routes_v2::books_in_series);
     cfg.service(routes_v2::books_by_publisher);
+    cfg.service(routes_v2::named_shelf);
     cfg.service(routes_v2::search);
 
     // The OPDS 1.2 feeds under `/v1`, JSON is under `/v2`.
@@ -254,6 +255,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(publishers);
     cfg.service(getbooks);
     cfg.service(recently_added);
+    cfg.service(named_shelf);
     cfg.service(books_by_tag);
     cfg.service(books_by_author);
     cfg.service(books_in_series);
@@ -407,7 +409,9 @@ mod tests {
         let state = create_app(config_for(&[("library", "tests/calibre")])).unwrap();
 
         assert!(state.pages.is_empty());
-        assert_eq!(state.landing("library").visible(&full()).len(), 6);
+
+        let db = calibre::lock(&state.db["library"]);
+        assert_eq!(state.landing("library").visible(&db, &full()).unwrap().len(), 6);
     }
 
     #[test]
@@ -417,7 +421,8 @@ mod tests {
             .unwrap();
 
         let state = create_app(landing_config("page.toml", dir.path())).unwrap();
-        let shown = state.landing("library").visible(&full());
+        let db = calibre::lock(&state.db["library"]);
+        let shown = state.landing("library").visible(&db, &full()).unwrap();
 
         assert_eq!(shown.len(), 1);
         assert_eq!(shown[0].title, "Genres");

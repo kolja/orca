@@ -385,6 +385,99 @@ pub fn books_by_tag_page(
     )
 }
 
+/// Which books a named shelf holds
+fn tagged(tags: &[String], all: bool) -> String {
+    if tags.is_empty() {
+        return "1".to_string();
+    }
+
+    let places = vec!["?"; tags.len()].join(", ");
+
+    match all {
+        false => format!(
+            "EXISTS (SELECT 1 FROM books_tags_link bt JOIN tags t ON t.id = bt.tag
+                     WHERE bt.book = b.id AND t.name IN ({}))",
+            places
+        ),
+        true => format!(
+            "(SELECT COUNT(DISTINCT bt.tag) FROM books_tags_link bt JOIN tags t ON t.id = bt.tag
+              WHERE bt.book = b.id AND t.name IN ({})) = {}",
+            places,
+            tags.len()
+        ),
+    }
+}
+
+/// The tags as query parameters, with whatever the query wants after them.
+fn with_tags<'a>(tags: &'a [String], rest: &[&'a dyn rusqlite::ToSql]) -> Vec<&'a dyn rusqlite::ToSql> {
+    let mut params: Vec<&dyn rusqlite::ToSql> =
+        tags.iter().map(|tag| tag as &dyn rusqlite::ToSql).collect();
+    params.extend_from_slice(rest);
+    params
+}
+
+/// One page of a named shelf
+pub fn books_tagged_page(
+    db: &Connection,
+    tags: &[String],
+    all: bool,
+    limit: usize,
+    offset: usize,
+) -> rusqlite::Result<Vec<Book>> {
+    let (limit, offset) = (limit as i64, offset as i64);
+
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE {}
+                ORDER BY b.sort LIMIT ? OFFSET ?;",
+            BOOK_COLUMNS,
+            tagged(tags, all)
+        ),
+        &with_tags(tags, &[&limit, &offset]),
+    )
+}
+
+/// The newest books of a named shelf. First filtered, then capped
+pub fn newest_tagged(db: &Connection, tags: &[String], all: bool) -> rusqlite::Result<Vec<Book>> {
+    query_books(
+        db,
+        &format!(
+            "SELECT {}
+                FROM books b
+                LEFT JOIN comments c ON b.id = c.book
+                WHERE {}
+                ORDER BY b.timestamp DESC LIMIT {};",
+            BOOK_COLUMNS,
+            tagged(tags, all),
+            RECENTLY_ADDED
+        ),
+        &with_tags(tags, &[]),
+    )
+}
+
+pub fn count_books_tagged(db: &Connection, tags: &[String], all: bool) -> rusqlite::Result<usize> {
+    count(
+        db,
+        &format!("SELECT COUNT(*) FROM books b WHERE {};", tagged(tags, all)),
+        rusqlite::params_from_iter(tags.iter()),
+    )
+}
+
+/// Whether a named shelf holds anything at all
+pub fn any_books_tagged(db: &Connection, tags: &[String], all: bool) -> rusqlite::Result<bool> {
+    let any: i64 = db.query_row(
+        &format!("SELECT EXISTS (SELECT 1 FROM books b WHERE {});", tagged(tags, all)),
+        rusqlite::params_from_iter(tags.iter()),
+        |row| row.get(0),
+    )?;
+
+    Ok(any != 0)
+}
+
 /// One page of an author's books, in the order the whole library is in.
 pub fn books_by_author_page(
     db: &Connection,
@@ -1169,5 +1262,80 @@ mod tests {
     fn a_wildcard_matches_nothing_it_does_not_spell() {
         let db = library();
         assert_eq!(count_books_matching(&db, "%").expect("count"), 0);
+    }
+    fn tagged_titles(tags: &[&str], all: bool) -> Vec<String> {
+        let tags: Vec<String> = tags.iter().map(|tag| tag.to_string()).collect();
+
+        books_tagged_page(&library(), &tags, all, 50, 0)
+            .expect("a named shelf")
+            .into_iter()
+            .map(|book| book.title)
+            .collect()
+    }
+
+    #[test]
+    fn a_named_shelf_holds_the_books_carrying_any_of_its_tags() {
+        let both = tagged_titles(&["science fiction", "fantasy"], false);
+
+        assert_eq!(both.len(), 5);
+        assert!(both.contains(&"Alice's Adventures in Wonderland".to_string()));
+        assert!(both.contains(&"Galactic Patrol".to_string()));
+    }
+
+    #[test]
+    fn the_spelling_of_a_tag_does_not_have_to_match_the_library() {
+        assert_eq!(
+            tagged_titles(&["SCIENCE FICTION"], false).len(),
+            tagged_titles(&["science fiction"], false).len()
+        );
+        assert_eq!(tagged_titles(&["Science Fiction"], false).len(), 4);
+    }
+
+    #[test]
+    fn every_one_of_the_tags_is_more_than_any_of_them() {
+        assert_eq!(tagged_titles(&["science fiction", "horror"], true), ["At the Mountains of Madness"]);
+        assert_eq!(tagged_titles(&["science fiction", "horror"], false).len(), 4);
+
+        // A tag no book carries empties a shelf that wants all of them.
+        assert!(tagged_titles(&["science fiction", "cooking"], true).is_empty());
+    }
+
+    // A shelf that is defined and matches nothing is empty, not an error.
+    #[test]
+    fn a_tag_the_library_never_heard_of_is_an_empty_shelf() {
+        let db = library();
+        let cooking = vec!["cooking".to_string()];
+
+        assert!(tagged_titles(&["cooking"], false).is_empty());
+        assert_eq!(count_books_tagged(&db, &cooking, false).expect("count"), 0);
+        assert!(!any_books_tagged(&db, &cooking, false).expect("exists"));
+    }
+
+    #[test]
+    fn counting_a_shelf_and_asking_whether_it_has_anything_agree() {
+        let db = library();
+
+        for (tags, all) in [
+            (vec!["science fiction".to_string()], false),
+            (vec!["science fiction".to_string(), "horror".to_string()], true),
+            (vec!["cooking".to_string()], false),
+        ] {
+            let total = count_books_tagged(&db, &tags, all).expect("count");
+            assert_eq!(any_books_tagged(&db, &tags, all).expect("exists"), total > 0);
+        }
+    }
+
+    // Filtered first and capped second: the newest of the books that match,
+    // rather than the ones that match among the newest.
+    #[test]
+    fn the_newest_of_a_shelf_are_drawn_from_the_books_that_match() {
+        let fiction = newest_tagged(&library(), &["fiction".to_string()], false).expect("newest");
+        let titles: Vec<String> = fiction.into_iter().map(|book| book.title).collect();
+
+        assert_eq!(titles.len(), 2);
+        assert!(titles.contains(&"Alice's Adventures in Wonderland".to_string()));
+
+        // Same books as the shelf itself holds, only in a different order.
+        assert_eq!(titles.len(), tagged_titles(&["fiction"], false).len());
     }
 }

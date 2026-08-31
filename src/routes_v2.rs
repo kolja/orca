@@ -16,7 +16,7 @@ use crate::appstate::AppState;
 use crate::authorized::Authorized;
 use crate::calibre::{self, Book, Identifier};
 use crate::config::CATALOG;
-use crate::landing::Kind;
+use crate::landing::{Kind, Section};
 use crate::opds2::{
     BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
     BOOK, FEED, IMAGE, PUBLICATION, SEARCH, SORT_NEW,
@@ -242,12 +242,15 @@ async fn library_root(
     let base = origin(&req, data.config);
     let root = root_of(&base, &lib);
 
-    let navigation: Vec<Link> = data
-        .landing(&lib)
-        .visible(&counts)
+    let page = match data.landing(&lib).visible(&db, &counts) {
+        Ok(page) => page,
+        Err(e) => return server_error("Error reading the landing page", e),
+    };
+
+    let navigation: Vec<Link> = page
         .iter()
         .map(|section| {
-            let link = Link::new(page_url(&root, section.feed(), 1))
+            let link = Link::new(page_url(&root, &section.feed(), 1))
                 .rel(match section.kind {
                     Kind::New => SORT_NEW,
                     _ => "subsection",
@@ -545,6 +548,58 @@ async fn publishers(
         &shelves(&base, &lib, "Publishers", Shelf::Publisher, &entries, calibre::updated(&db)),
         FEED,
     )
+}
+
+/// A shelf from a custom landing page. Books are paged.
+/// a `new` section is the newest of them, capped and unpaged (same as `/new`)
+#[actix_web::get("/v2/{lib}/shelves/{slug}")]
+async fn named_shelf(
+    data: web::Data<AppState>,
+    path: web::Path<(String, String)>,
+    query: web::Query<PageQuery>,
+    _auth: Authorized,
+    req: HttpRequest,
+) -> impl Responder {
+    let (lib, slug) = path.into_inner();
+
+    if let Err(response) = library(&data, &lib) {
+        return response;
+    }
+
+    let Some(section) = data.landing(&lib).shelf(&slug) else {
+        return HttpResponse::NotFound().body(format!("No shelf named '{}' in {}", slug, lib));
+    };
+
+    match (section.kind, section.shelf()) {
+        (Kind::New, _) => newest_feed(&data, &req, &lib, section),
+        (_, Some(shelf)) => books_feed(&data, &req, &lib, shelf, query.page.unwrap_or(1)),
+        (_, None) => HttpResponse::NotFound().body(format!("No shelf named '{}' in {}", slug, lib)),
+    }
+}
+
+/// The newest books of one shelf: filtered first, capped second.
+fn newest_feed(data: &AppState, req: &HttpRequest, lib: &str, section: &Section) -> HttpResponse {
+    let db = match library(data, lib) {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+
+    let (named, all) = section.tags();
+    let books = match calibre::newest_tagged(&db, named, all) {
+        Ok(books) => books,
+        Err(e) => return server_error("Error querying books", e),
+    };
+
+    let base = origin(req, data.config);
+    let newest = library_feed(
+        format!("{} | {}", lib, section.title),
+        page_url(&root_of(&base, lib), &section.feed(), 1),
+        &base,
+        lib,
+    )
+    .modified(calibre::updated(&db));
+
+    json(&holding(newest, &books, lib, &base), FEED)
 }
 
 /// The newest arrivals, in the order they arrived.

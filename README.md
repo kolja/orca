@@ -91,13 +91,35 @@ type = "books"
 
 [[section]]
 type = "tags"
-title = "Genres" # optional: You can rename what the section should be called.
 
 [[section]]
 type = "new"
+title = "Most Recent Arrivals"        # optional: rename the section
+
+[[section]]
+id = "scifi"                          # served at /{library}/shelves/scifi
+title = "Scifi & Fantasy"
+type = "books"
+tags_any = ["science fiction", "fantasy"] # any one of these tags is enough
+
+[[section]]
+id = "graphic-novel"
+title = "Graphic Novel"
+type = "books"
+tags_all = ["comic", "literature"]    # a book needs every one of them
+
+[[section]]
+id = "thrillers"
+title = "New Thrillers"
+type = "new"                          # the newest of the books that match
+tags_any = ["thriller", "suspense"]
 ```
 
-`type` is the only key a section needs, you can supply a `title` if you would like to rename a section.
+`type` is the only key required by a section. You can supply a `title` if you would like to rename it.
+
+`books` and `new` sections can be narrowed down with `tags_any` (list books where any of the tags match) and `tags_all` (all tags must be present).
+
+The tags are case insensitive and shelves that are filtered like this also need an `id`.
 
 ## Authentication
 

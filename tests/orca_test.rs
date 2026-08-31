@@ -25,6 +25,11 @@ static PARTLY_PUBLIC: Lazy<Config> = Lazy::new(|| {
     read_config("tests/orca.public.test.toml").expect("Failed to read test config")
 });
 
+/// One library, served with a landing page of named shelves and no login
+static SHELVES: Lazy<Config> = Lazy::new(|| {
+    read_config("tests/orca.shelves.test.toml").expect("Failed to read test config")
+});
+
 async fn setup(config: &'static Config) -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
     let state = create_app(config).expect("Failed to create app");
     test::init_service(orca::app(state)).await
@@ -1338,6 +1343,95 @@ async fn authorized_request_to_public_route_https() {
         .to_request();
     let resp = test::call_service(&app, req).await;
     assert!(resp.status().is_success());
+}
+
+// ------- A landing page with named shelves on it -------
+
+/// The shelves in `tests/shelves.toml`, against the tags in `tests/calibre`:
+///   science fiction  2, 7, 8, 9      fantasy  4
+///   horror           8               fiction  2, 4
+#[test]
+async fn a_landing_page_offers_the_sections_it_names() {
+    let app = setup(&SHELVES).await;
+    let content = body_of(&app, "/v1/library", "").await;
+
+    // no book in the library is tagged "chess". The ampersand is escaped.
+    assert_eq!(
+        titles(&content),
+        ["All Books", "Scifi &amp; Fantasy", "Cosmic Horror", "New Arrivals in Fiction", "Genres"]
+    );
+    assert_eq!(count_links(&content, "/v1/library/shelves/scifi"), 1);
+    assert!(!content.contains("/shelves/chess"), "{}", content);
+
+    // A filtered section says which books it holds; they are not counted.
+    assert!(
+        content.contains("<content type=\"text\">Books tagged Science Fiction or fantasy</content>"),
+        "{}",
+        content
+    );
+}
+
+#[test]
+async fn a_named_shelf_holds_the_books_carrying_any_of_its_tags() {
+    let app = setup(&SHELVES).await;
+    let content = body_of(&app, "/v1/library/shelves/scifi", "").await;
+
+    assert_eq!(count_items(&content), 5);
+    assert!(content.contains("<title>library | Scifi &amp; Fantasy</title>"), "{}", content);
+}
+
+#[test]
+async fn tags_all_wants_every_one_of_them_and_not_merely_one() {
+    let app = setup(&SHELVES).await;
+    let content = body_of(&app, "/v1/library/shelves/cosmic-horror", "").await;
+
+    // Only "At the Mountains of Madness" is both.
+    assert_eq!(count_items(&content), 1);
+    assert!(content.contains("At the Mountains of Madness"), "{}", content);
+}
+
+// A `new` section is a window on its shelf: first filtered, then capped.
+#[test]
+async fn a_filtered_new_section_holds_the_newest_of_the_books_that_match() {
+    let app = setup(&SHELVES).await;
+    let content = body_of(&app, "/v1/library/shelves/fresh-fiction", "").await;
+
+    assert_eq!(count_items(&content), 2);
+    // Unpaged, like `/new`
+    assert!(!content.contains("rel=\"next\""), "{}", content);
+}
+
+#[test]
+async fn a_named_shelf_that_matches_nothing_is_an_empty_feed_and_not_a_404() {
+    let app = setup(&SHELVES).await;
+    let content = body_of(&app, "/v1/library/shelves/chess", "").await;
+
+    assert_eq!(count_items(&content), 0);
+    assert!(content.contains("<title>library | Chess</title>"), "{}", content);
+}
+
+// A slug only exists if it is defined on a landing page
+#[test]
+async fn a_slug_no_landing_page_defines_is_not_found() {
+    let app = setup(&SHELVES).await;
+    let (status, _) = answer_to(&app, "/v1/library/shelves/nonesuch", "").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // ...and the default landing page defines none at all.
+    let plain = setup(&ONE_LIBRARY).await;
+    let credentials = BASE64.encode("alice:secretpassword");
+    let (status, _) = answer_to(&plain, "/v1/library/shelves/scifi", &credentials).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[test]
+async fn a_named_shelf_pages_like_every_other_shelf() {
+    let app = setup(&SHELVES).await;
+    let content = body_of(&app, "/v1/library/shelves/scifi?page=2", "").await;
+
+    // Five books fit on one page, so page two is page one.
+    assert_eq!(count_items(&content), 5);
+    assert!(content.contains(r#"opensearch:totalResults>5<"#), "{}", content);
 }
 
 // ------- Helper Functions -------

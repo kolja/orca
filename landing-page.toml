@@ -23,13 +23,14 @@
 # it to the books carrying those tags. In this case, an `id` is also required. It is used as a slug.
 # 
 # Books can also be rendered "inline": e.g. `show = 8` will render eight books from that section
-# directly o the landing page.
+# directly on the landing page.
 
 [[section]]
 type = "books"
 
 [[section]]
 type = "new"
+show = 12
 
 [[section]]
 type = "authors"

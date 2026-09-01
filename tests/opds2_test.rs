@@ -69,14 +69,18 @@ async fn a_library_offers_its_books() {
     assert_eq!(library["metadata"]["title"], "library");
     assert_eq!(
         titles(&library["navigation"]),
-        ["All Books", "Recently Added", "Authors", "Tags", "Series", "Publishers"]
+        ["All Books", "Authors", "Tags", "Series", "Publishers"]
     );
     // Seven books, by eight authors, seven tags, one series, three publishers.
     assert_eq!(library["navigation"][0]["properties"]["numberOfItems"], 7);
-    assert_eq!(library["navigation"][2]["properties"]["numberOfItems"], 8);
-    assert_eq!(library["navigation"][3]["properties"]["numberOfItems"], 7);
-    assert_eq!(library["navigation"][4]["properties"]["numberOfItems"], 1);
-    assert_eq!(library["navigation"][5]["properties"]["numberOfItems"], 3);
+    assert_eq!(library["navigation"][1]["properties"]["numberOfItems"], 8);
+    assert_eq!(library["navigation"][2]["properties"]["numberOfItems"], 7);
+    assert_eq!(library["navigation"][3]["properties"]["numberOfItems"], 1);
+    assert_eq!(library["navigation"][4]["properties"]["numberOfItems"], 3);
+
+    // The one section the built-in page shows inline: a group of covers, not a link.
+    assert_eq!(group_titles(&library), ["Recently Added"]);
+    assert_eq!(publications(&library["groups"][0]).len(), 7); // `show = 12`, seven books
 }
 
 // ------- Browsing by author and by tag -------

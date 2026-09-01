@@ -121,7 +121,7 @@ tags_any = ["thriller", "suspense"]
 
 The tags are case insensitive and shelves that are filtered like this also need an `id`.
 
-In an OPDS 2.0 feed you can choose to render a section "inline", showing a number of book covers directly on the landing pageby adding a `show = n` key:
+In an OPDS 2.0 feed you can choose to render a section "inline", showing a number of book covers directly on the landing page by adding a `show = n` key:
 
 ```toml
 [[section]]

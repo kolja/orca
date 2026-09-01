@@ -2,6 +2,7 @@
 
 ## 0.2.2
 
+bumped dependencies: `actix-filer`, `argon2` and `quick-xml`
 The library root is a landing page now and can be configured.
 See the `README.md` and `landing_page.toml` for details.
 
@@ -29,7 +30,7 @@ The catalog lists only the libraries the caller can open.
 
 Calibre libraries are opened read-only
 
-Spelling of Protocol in the config: `http` and `https` (all lowercase). 
+Spelling of Protocol in the config: `http` and `https` (all lowercase).
 `Http` and `Https` still work but consider that spelling deprecated.
 
 Some `identifiers` from books in Calibre are exposed to the feed (isbn, doi...)

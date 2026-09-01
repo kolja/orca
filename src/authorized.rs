@@ -63,13 +63,10 @@ fn verify_credentials(header: &HeaderValue, config: &Config) -> Option<Authorize
                .and_then(|loginpassword| {
                    let (login, password) = loginpassword.split_once(":")?;
                    let hash = config.authentication.as_ref()?.login.get(login)?;
-                   match hash::verify_password(password, hash).ok()? {
-                       true => Some(Authorized {
-                            login: login.to_string(),
-                            limited: false,
-                       }),
-                       false => None,
-                   }
+                   hash::verify_password(password, hash).then(|| Authorized {
+                       login: login.to_string(),
+                       limited: false,
+                   })
                })
 }
 

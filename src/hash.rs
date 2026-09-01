@@ -1,7 +1,4 @@
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2
-};
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use anyhow::{Result, anyhow};
 
 pub fn hash(login: &str, password: &str) -> Result<String> {
@@ -9,18 +6,16 @@ pub fn hash(login: &str, password: &str) -> Result<String> {
         return Err(anyhow!("Invalid login or password format"));
     }
 
-    let salt = SaltString::generate(&mut OsRng);
+    // argon2 salts the password itself, with 16 random bytes
     let argon2 = Argon2::default();
-    let hash = argon2.hash_password(password.as_bytes(), &salt)
-                     .map_err(|e| anyhow!("Hash error: {:?}", e))?
-                     .to_string();
+    let hash: PasswordHash = argon2.hash_password(password.as_bytes())
+                                   .map_err(|e| anyhow!("Hash error: {:?}", e))?;
 
-    Ok(hash)
+    Ok(hash.to_string())
 }
 
-pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
-    let parsed_hash = PasswordHash::new(hash).map_err(|err| anyhow!("Hash error: {}", err))?;
-    Ok(Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok())
+pub fn verify_password(password: &str, hash: &str) -> bool {
+    Argon2::default().verify_password(password.as_bytes(), hash).is_ok()
 }
 
 pub fn encode_auth_data(login: &str, password: &str) -> Result<String> {
@@ -67,9 +62,7 @@ mod tests {
         let login = "bob";
         let password = "cantbeguessed";
         let hash_result = hash(login, password).unwrap();
-        let verify_result = verify_password(password, &hash_result);
-        assert!(verify_result.is_ok());
-        assert!(verify_result.unwrap());
+        assert!(verify_password(password, &hash_result));
     }
 
     #[test]
@@ -79,9 +72,15 @@ mod tests {
         let hash_result = hash(login, password).unwrap();
 
         let wrong_password = "WrongPassword";
-        let verify_result = verify_password(wrong_password, &hash_result);
-        assert!(verify_result.is_ok());
-        assert!(!verify_result.unwrap());
+        assert!(!verify_password(wrong_password, &hash_result));
+    }
+
+    #[test]
+    fn test_verify_password_refuses_a_hash_it_cannot_read() {
+        // What a config holds if someone typed the hash in by hand
+        for hash in ["", "secretpassword", "$argon2id$v=19$m=19456,t=2,p=1$notasalt"] {
+            assert!(!verify_password("secretpassword", hash), "{}", hash);
+        }
     }
 
     #[test]

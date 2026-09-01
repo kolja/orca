@@ -7,7 +7,7 @@ repository = "https://github.com/kolja/orca"
 [dependencies]
 tokio = "1.49"
 actix-web = { version = "4.12", features = ["rustls-0_23"]}
-actix-files = "0.6"
+actix-files = "0.7"
 base64 = "0.23"
 toml = "1.1.3"
 serde = "1.0.228"
@@ -26,7 +26,7 @@ once_cell = "1.21"
 rustls = "0.23.36"
 rustls-pemfile = "2.2"
 anyhow = "1.0.101"
-argon2 = { version = "0.5.3", features = ["std"] }
+argon2 = "0.6.0"
 isolang = { version = "2.4.0", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
@@ -36,7 +36,7 @@ openssl = { version = "0.10.75", features = ["vendored"] }
 assert_cmd = "2.1"
 reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio = { version = "1.49", features = ["full"] }
-quick-xml = "0.41"
+quick-xml = "0.42"
 actix-http = "3.11"
 tempfile = "3.24"
 boon = "0.6.1"

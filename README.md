@@ -121,6 +121,22 @@ tags_any = ["thriller", "suspense"]
 
 The tags are case insensitive and shelves that are filtered like this also need an `id`.
 
+In an OPDS 2.0 feed you can choose to render a section "inline", showing a number of book covers directly on the landing pageby adding a `show = n` key:
+
+```toml
+[[section]]
+type = "books"
+show = 8
+
+[[section]]
+id = "pick"
+title = "Book of the Month"
+type = "new"
+tags_any = ["staff-pick"]
+show = 1
+```
+for the OPDS 1.2 feed this key has no effect. The section is rendered as a link.
+
 ## Authentication
 
 The server supports basic authentication: You can generate a password hash like so:

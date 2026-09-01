@@ -31,6 +31,10 @@ static TEST_HTTPS_CONFIG: Lazy<Config> =
 static SHELVES_CONFIG: Lazy<Config> =
     Lazy::new(|| read_config("tests/orca.shelves.test.toml").expect("Failed to read test config"));
 
+/// The same library, with sections that show their books directly on the landing page
+static INLINE_CONFIG: Lazy<Config> =
+    Lazy::new(|| read_config("tests/orca.inline.test.toml").expect("Failed to read test config"));
+
 // ------- The feeds -------
 
 // One library: the root is a redirect, the same as the OPDS 1.2 root.
@@ -816,6 +820,85 @@ async fn a_slug_no_landing_page_defines_is_not_found() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+// ------- Sections shown on the landing page -------
+
+#[test]
+async fn an_inline_section_is_a_group_of_books_rather_than_a_link() {
+    let app = setup(&INLINE_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    validates(&library, FEED);
+
+    // no book is tagged "Chess"
+    assert_eq!(
+        group_titles(&library),
+        ["Recently Added", "All Books", "Scifi & Fantasy", "Book of the Month"]
+    );
+    assert_eq!(titles(&library["navigation"]), ["Authors"]);
+}
+
+#[test]
+async fn a_group_leads_to_the_rest_of_its_shelf() {
+    let app = setup(&INLINE_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    let scifi = &library["groups"][2]["links"][0];
+    assert_eq!(scifi["href"], "http://localhost:8080/v2/library/shelves/scifi");
+    assert_eq!(scifi["rel"], "self");
+    assert_eq!(scifi["type"], "application/opds+json");
+
+    let shelf = feed(&app, "/v2/library/shelves/scifi").await;
+    assert_eq!(shelf["publications"].as_array().unwrap().len(), 5);
+}
+
+#[test]
+async fn a_group_shows_no_more_books_than_it_asked_for() {
+    let app = setup(&INLINE_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    // `show = 3`, out of seven books in the library
+    assert_eq!(publications(&library["groups"][0]).len(), 3);
+    // `show = 12` against a library of seven: the whole shelf
+    assert_eq!(publications(&library["groups"][1]).len(), 7);
+    // filtered first, so the tags decide before the number does
+    assert_eq!(publications(&library["groups"][2]).len(), 5);
+    // a group of one book is possible
+    assert_eq!(publications(&library["groups"][3]).len(), 1);
+
+    let inline = &library["groups"][1]["publications"][0];
+    assert_eq!(inline, &feed(&app, "/v2/library/books").await["publications"][0]);
+}
+
+/// A group says how big its shelf is
+#[test]
+async fn a_group_is_a_window_rather_than_a_page_of_its_shelf() {
+    let app = setup(&INLINE_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    assert!(library["groups"][0]["metadata"]["numberOfItems"].is_null(), "Recently Added");
+    assert_eq!(library["groups"][1]["metadata"]["numberOfItems"], 7);
+    assert!(library["groups"][2]["metadata"]["numberOfItems"].is_null(), "a filtered shelf");
+    assert!(library["groups"][3]["metadata"]["numberOfItems"].is_null(), "a shelf of one");
+
+    // no Paging info for Group: there is no next window.
+    for group in library["groups"].as_array().unwrap() {
+        assert!(group["metadata"]["itemsPerPage"].is_null(), "{}", group["metadata"]);
+        assert!(group["metadata"]["currentPage"].is_null(), "{}", group["metadata"]);
+        assert_eq!(rels(&group["links"]), ["self"]);
+    }
+}
+
+#[test]
+async fn a_root_full_of_books_still_claims_no_paging_of_its_own() {
+    let app = setup(&INLINE_CONFIG).await;
+    let metadata = feed(&app, "/v2/library").await["metadata"].clone();
+
+    assert_eq!(metadata["title"], "library");
+    assert!(metadata["numberOfItems"].is_null(), "{}", metadata);
+    assert!(metadata["itemsPerPage"].is_null(), "{}", metadata);
+    assert!(metadata["currentPage"].is_null(), "{}", metadata);
+}
+
 // ------- Helper Functions -------
 
 async fn setup(
@@ -873,6 +956,20 @@ async fn publication(
 
 fn titles(links: &Value) -> Vec<String> {
     collect(links, "title")
+}
+
+fn group_titles(feed: &Value) -> Vec<String> {
+    feed["groups"]
+        .as_array()
+        .expect("groups")
+        .iter()
+        .map(|group| group["metadata"]["title"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+/// The books of one group
+fn publications(group: &Value) -> &Vec<Value> {
+    group["publications"].as_array().expect("publications")
 }
 
 fn names(values: &Value) -> Vec<String> {

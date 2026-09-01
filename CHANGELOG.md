@@ -9,6 +9,9 @@ A `books` or `new` section can be narrowed to the books carrying certain tags,
 with `tags_any` or `tags_all`. Such a section needs an `id` and is served at
 `/{lib}/shelves/{id}`, in both feed formats.
 
+With `show = 8` on such a section -- in a `/v2` feed -- eight of those books are rendered "inline",
+straight to the landing page. In `/v1` that section is rendered as a link as before.
+
 `/` now redirects to `/v1` (also a reserved route now) for the Atom feed.
 Covers and downloads remain unversioned under `/{lib}/cover/{id}` and `/{lib}/file/{id}/{format}`
 Trailing or a doubled slashes are normalized.

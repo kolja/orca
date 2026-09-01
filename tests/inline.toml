@@ -1,0 +1,37 @@
+# Written against the tags in `tests/calibre`, to show sections inline.
+# The same page is served to `/v1`, which has no groups and renders plain links.
+
+[[section]]
+type = "new"
+show = 3
+
+# All seven books of the fixture library, fewer than it asked for.
+[[section]]
+type = "books"
+show = 12
+
+[[section]]
+id = "scifi"
+title = "Scifi & Fantasy"
+type = "books"
+show = 12
+tags_any = ["science fiction", "fantasy"]
+
+# One book is a section like any other.
+[[section]]
+id = "pick"
+title = "Book of the Month"
+type = "books"
+show = 1
+tags_any = ["horror"]
+
+# No book carries this tag
+[[section]]
+id = "chess"
+title = "Chess"
+type = "books"
+show = 12
+tags_any = ["chess"]
+
+[[section]]
+type = "authors"

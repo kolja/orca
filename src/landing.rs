@@ -17,7 +17,7 @@ use serde_derive::Deserialize;
 
 use rusqlite::Connection;
 
-use crate::calibre::{self, Counts};
+use crate::calibre::{self, Book, Counts};
 use crate::shelf::{Named, Shelf};
 
 /// SQLite's `NOCASE` folds ASCII and nothing else, so this has to fold the same
@@ -29,11 +29,6 @@ fn deduplicated(tags: Vec<String>) -> Vec<String> {
 }
 
 const DEFAULT: &str = include_str!("../landing-page.toml");
-
-/// How many books an inline section shows unless it says otherwise
-const BOOKS_SHOWN: usize = 12;
-
-const FEWEST_SHOWN: usize = 2;
 
 /// The six things a section can be
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -83,11 +78,10 @@ impl Kind {
 pub struct Section {
     pub kind: Kind,
     pub title: String,
-    pub id: Option<String>,
-    pub tags_any: Vec<String>, // At least one of these tags.
-    pub tags_all: Vec<String>, // All of these tags.
-    pub inline: bool, // show Covers directly on the landing page (not just a link)
-    pub shown: usize, // in case we show covers: how many?
+    pub id: Option<String>,     // only required with tags_any or tags_all
+    pub tags_any: Vec<String>,  // limit to books with at least one of these tags
+    pub tags_all: Vec<String>,  //                     all of these tags
+    pub shown: usize,           // how many book-covers to show directly on the landing page
 }
 
 /// A section as it is written, before anything about it has been checked.
@@ -103,8 +97,7 @@ struct Written {
     #[serde(default)]
     tags_all: Vec<String>,
     #[serde(default)]
-    inline: bool,
-    count: Option<usize>,
+    show: usize,
 }
 
 impl Section {
@@ -115,8 +108,7 @@ impl Section {
             id: None,
             tags_any: Vec::new(),
             tags_all: Vec::new(),
-            inline: false,
-            shown: BOOKS_SHOWN,
+            shown: 0,
         }
     }
 
@@ -133,10 +125,10 @@ impl Section {
             ));
         }
 
-        if !written.kind.is_shelf() && (filtered || written.inline || written.count.is_some()) {
+        if !written.kind.is_shelf() && (filtered || written.show > 0) {
             return Err(anyhow!(
                 "section \"{}\": type = \"{}\" is a list of links rather than of books, \
-                 so it takes no tags_any, tags_all, inline or count.",
+                 so it takes no tags_any, tags_all or show.",
                 named,
                 written.kind.feed()
             ));
@@ -160,27 +152,19 @@ impl Section {
             }
         }
 
-        if let Some(count) = written.count {
-            if count < FEWEST_SHOWN {
-                return Err(anyhow!(
-                    "section \"{}\": count = {} -- a row of one book is drawn by no client at all. \
-                     The fewest worth asking for is {}.",
-                    named,
-                    count,
-                    FEWEST_SHOWN
-                ));
-            }
-        }
-
         Ok(Section {
             kind: written.kind,
             title: named,
             id: written.id,
             tags_any: deduplicated(written.tags_any),
             tags_all: deduplicated(written.tags_all),
-            inline: written.inline,
-            shown: written.count.unwrap_or(BOOKS_SHOWN),
+            shown: written.show,
         })
+    }
+
+    /// `show = 0` and absence of `show`: render a link.
+    pub fn inline(&self) -> bool {
+        self.shown > 0
     }
 
     /// are we talking about some of the library or all of it?
@@ -232,6 +216,22 @@ impl Section {
             Kind::Series => Some(counts.series),
             Kind::Publishers => Some(counts.publishers),
         }
+    }
+
+    /// The books the section puts directly landing page ("inline").
+    /// newest first if the section is a `new` one.
+    pub fn preview(&self, db: &Connection) -> rusqlite::Result<Vec<Book>> {
+        let (tags, all) = self.tags();
+
+        let mut books = match (self.kind, self.filtered()) {
+            (Kind::New, true) => calibre::newest_tagged(db, tags, all)?,
+            (Kind::New, false) => calibre::recently_added(db)?,
+            (_, true) => calibre::books_tagged_page(db, tags, all, self.shown, 0)?,
+            (_, false) => calibre::books_page(db, self.shown, 0)?,
+        };
+        books.truncate(self.shown);
+
+        Ok(books)
     }
 
     /// Whether this section is offered at all
@@ -476,7 +476,7 @@ mod tests {
     // books in them to filter, and nothing to show as covers.
     #[test]
     fn a_list_of_links_takes_none_of_the_keys_that_describe_books() {
-        for key in ["tags_any = [\"a\"]", "tags_all = [\"a\"]", "inline = true", "count = 4"] {
+        for key in ["tags_any = [\"a\"]", "tags_all = [\"a\"]", "show = 4"] {
             let source = format!("[[section]]\ntype = \"authors\"\n{}\n", key);
             let err = refusal(&source, "a category must not take a book key");
 
@@ -514,17 +514,15 @@ mod tests {
         assert!(err.contains("written twice"), "{}", err);
     }
 
-    // `count = 1` renders nothing
     #[test]
-    fn a_row_of_one_book_is_refused_rather_than_drawn_as_nothing() {
-        for count in [0, 1] {
-            let source = format!("[[section]]\ntype = \"new\"\ninline = true\ncount = {}\n", count);
-            let err = refusal(&source, "a count below two must not parse");
+    fn a_section_shows_as_many_books_as_it_asked_for_and_no_number_is_refused() {
+        for (show, shown) in [("", 0), ("show = 0\n", 0), ("show = 1\n", 1), ("show = 40\n", 40)] {
+            let page = one(&format!("[[section]]\ntype = \"new\"\n{}", show));
+            let section = &page.visible(&library(), &counts(7, 8, 7, 1, 3)).unwrap()[0];
 
-            assert!(err.contains("no client at all"), "{}: {}", count, err);
+            assert_eq!(section.shown, shown, "show = {:?}", show);
+            assert_eq!(section.inline(), shown > 0, "show = {:?}", show);
         }
-
-        assert!(Landing::parse("[[section]]\ntype = \"new\"\ninline = true\ncount = 2\n").is_ok());
     }
 
     fn one(source: &str) -> Landing {
@@ -601,6 +599,46 @@ mod tests {
 
         assert_eq!(section.total(&counts(7, 8, 7, 1, 3)), None);
         assert!(section.visible(&db, &counts(7, 8, 7, 1, 3)).unwrap());
+    }
+
+    fn previewed(source: &str) -> Vec<String> {
+        let page = one(source);
+        let db = library();
+        let sections = page.visible(&db, &counts(7, 8, 7, 1, 3)).unwrap();
+
+        sections[0].preview(&db).expect("the books of a section").into_iter().map(|book| book.title).collect()
+    }
+
+    // A section shows the first few of its shelf, and asks for no more of the library
+    #[test]
+    fn an_inline_section_shows_the_start_of_its_shelf() {
+        assert_eq!(previewed("[[section]]\ntype = \"books\"\nshow = 2\n").len(), 2);
+
+        // One book is a section like any other, not a row too short to draw.
+        assert_eq!(previewed("[[section]]\ntype = \"books\"\nshow = 1\n").len(), 1);
+
+        // The whole shelf, when it is shorter than the number asked for.
+        assert_eq!(previewed("[[section]]\ntype = \"books\"\nshow = 12\n").len(), 7);
+    }
+
+    // `new` is capped by the library rather than by the section
+    #[test]
+    fn an_inline_new_section_is_cut_to_the_number_it_asked_for() {
+        assert_eq!(previewed("[[section]]\ntype = \"new\"\nshow = 3\n").len(), 3);
+    }
+
+    // first filtered, then capped: Four is the fewest that can assert the difference:
+    // the philosophy book is the fourth of the library and it's not on the science fiction shelf.
+    #[test]
+    fn an_inline_filtered_section_shows_the_start_of_what_it_matched() {
+        let scifi = previewed(
+            "[[section]]\nid = \"sf\"\ntype = \"books\"\nshow = 4\n\
+             tags_any = [\"science fiction\", \"fantasy\"]\n",
+        );
+
+        assert_eq!(scifi.len(), 4);
+        assert!(!scifi.iter().any(|title| title.starts_with("Kritik")), "{:?}", scifi);
+        assert!(scifi.contains(&"Vampires of Space".to_string()), "{:?}", scifi);
     }
 
     #[test]

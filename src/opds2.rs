@@ -39,6 +39,8 @@ pub struct Feed {
     pub navigation: Vec<Link>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub publications: Vec<Publication>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub groups: Vec<Group>,
 }
 
 impl Feed {
@@ -52,6 +54,7 @@ impl Feed {
             links: vec![Link::new(self_url).rel("self").mime(FEED)],
             navigation: Vec::new(),
             publications: Vec::new(),
+            groups: Vec::new(),
         }
     }
 
@@ -67,6 +70,11 @@ impl Feed {
 
     pub fn publications(mut self, publications: Vec<Publication>) -> Self {
         self.publications = publications;
+        self
+    }
+
+    pub fn groups(mut self, groups: Vec<Group>) -> Self {
+        self.groups = groups;
         self
     }
 
@@ -97,6 +105,40 @@ pub struct FeedMetadata {
     pub items_per_page: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_page: Option<usize>,
+}
+
+/// show Books directly on the landing page
+/// A group is a window on a shelf: it says how many books the whole shelf holds, not how the window is paged
+#[derive(Debug, Serialize)]
+pub struct Group {
+    pub metadata: FeedMetadata,
+    pub links: Vec<Link>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub publications: Vec<Publication>,
+}
+
+impl Group {
+    pub fn new(title: impl Into<String>, self_url: impl Into<String>) -> Self {
+        Group {
+            metadata: FeedMetadata {
+                title: title.into(),
+                ..FeedMetadata::default()
+            },
+            links: vec![Link::new(self_url).rel("self").mime(FEED)],
+            publications: Vec::new(),
+        }
+    }
+
+    /// How many books are waiting on the whole shelf
+    pub fn count(mut self, total: usize) -> Self {
+        self.metadata.number_of_items = Some(total);
+        self
+    }
+
+    pub fn publications(mut self, publications: Vec<Publication>) -> Self {
+        self.publications = publications;
+        self
+    }
 }
 
 /// A Link Object: for navigation entries, acquisition links, cover images and pagination
@@ -285,8 +327,35 @@ mod tests {
 
         assert!(feed.get("navigation").is_none());
         assert!(feed.get("publications").is_none());
+        assert!(feed.get("groups").is_none());
         assert!(feed["metadata"].get("modified").is_none());
         assert!(feed["links"][0].get("title").is_none());
+    }
+
+    // A group leads to its own shelf, and says how big that shelf is
+    #[test]
+    fn a_group_stands_for_the_shelf_it_shows_the_start_of() {
+        let group = Group::new("All Books", "/v2/library/books?page=1").count(1234);
+
+        assert_eq!(
+            to_value(&group).unwrap(),
+            json!({
+                "metadata": { "title": "All Books", "numberOfItems": 1234 },
+                "links": [{
+                    "href": "/v2/library/books?page=1",
+                    "rel": "self",
+                    "type": "application/opds+json",
+                }],
+            })
+        );
+    }
+
+    #[test]
+    fn a_group_that_was_never_counted_says_nothing_about_its_size() {
+        let group = to_value(Group::new("Recently Added", "/v2/library/new")).unwrap();
+
+        assert!(group["metadata"].get("numberOfItems").is_none());
+        assert!(group.get("publications").is_none());
     }
 
     #[test]

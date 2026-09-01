@@ -18,8 +18,8 @@ use crate::calibre::{self, Book, Identifier};
 use crate::config::CATALOG;
 use crate::landing::{Kind, Section};
 use crate::opds2::{
-    BelongsTo, BookMetadata, Contributor, Feed, Link, Publication, Series, Subject, ACQUISITION,
-    BOOK, FEED, IMAGE, PUBLICATION, SEARCH, SORT_NEW,
+    BelongsTo, BookMetadata, Contributor, Feed, Group, Link, Publication, Series, Subject,
+    ACQUISITION, BOOK, FEED, IMAGE, PUBLICATION, SEARCH, SORT_NEW,
 };
 use crate::routes::{origin, server_error};
 use crate::shelf::{self, feed_of, page_url, window, Shelf, PER_PAGE};
@@ -247,27 +247,49 @@ async fn library_root(
         Err(e) => return server_error("Error reading the landing page", e),
     };
 
-    let navigation: Vec<Link> = page
-        .iter()
-        .map(|section| {
-            let link = Link::new(page_url(&root, &section.feed(), 1))
-                .rel(match section.kind {
-                    Kind::New => SORT_NEW,
-                    _ => "subsection",
-                })
-                .mime(FEED)
-                .title(section.title.clone());
+    // A section that shows books becomes a group, the rest stay links
+    let mut navigation: Vec<Link> = Vec::new();
+    let mut groups: Vec<Group> = Vec::new();
 
-            match section.total(&counts) {
-                Some(total) => link.count(total),
-                None => link,
+    for section in &page {
+        let href = page_url(&root, &section.feed(), 1);
+
+        if section.inline() {
+            let books = match section.preview(&db) {
+                Ok(books) => books,
+                Err(e) => return server_error("Error querying books", e),
+            };
+
+            let mut group = Group::new(section.title.clone(), href).publications(
+                books.iter().map(|book| publication(book, &lib, &base)).collect(),
+            );
+
+            if let Some(total) = section.total(&counts) {
+                group = group.count(total);
             }
-        })
-        .collect();
+
+            groups.push(group);
+            continue;
+        }
+
+        let link = Link::new(href)
+            .rel(match section.kind {
+                Kind::New => SORT_NEW,
+                _ => "subsection",
+            })
+            .mime(FEED)
+            .title(section.title.clone());
+
+        navigation.push(match section.total(&counts) {
+            Some(total) => link.count(total),
+            None => link,
+        });
+    }
 
     let root = library_feed(lib.clone(), format!("{}/v2/{}", base, lib), &base, &lib)
         .modified(calibre::updated(&db))
-        .navigation(navigation);
+        .navigation(navigation)
+        .groups(groups);
 
     json(&root, FEED)
 }

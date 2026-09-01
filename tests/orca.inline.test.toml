@@ -1,0 +1,12 @@
+[server]
+ip = "127.0.0.1"
+port = 8888
+protocol = "http"
+
+# No [authentication] section: the library is served without a login.
+
+[catalog]
+landing_page = "inline.toml"
+
+[calibre.libraries.library]
+path = "tests/calibre"

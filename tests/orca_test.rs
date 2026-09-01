@@ -30,6 +30,10 @@ static SHELVES: Lazy<Config> = Lazy::new(|| {
     read_config("tests/orca.shelves.test.toml").expect("Failed to read test config")
 });
 
+static INLINE: Lazy<Config> = Lazy::new(|| {
+    read_config("tests/orca.inline.test.toml").expect("Failed to read test config")
+});
+
 async fn setup(config: &'static Config) -> impl Service<Request, Response = ServiceResponse, Error = actix_web::Error> {
     let state = create_app(config).expect("Failed to create app");
     test::init_service(orca::app(state)).await
@@ -1432,6 +1436,24 @@ async fn a_named_shelf_pages_like_every_other_shelf() {
     // Five books fit on one page, so page two is page one.
     assert_eq!(count_items(&content), 5);
     assert!(content.contains(r#"opensearch:totalResults>5<"#), "{}", content);
+}
+
+// Atom has no way of rendering book covers directly on the page, so `show` is a v2 thing
+#[test]
+async fn a_section_that_shows_its_books_is_an_ordinary_link_in_atom() {
+    let app = setup(&INLINE).await;
+    let content = body_of(&app, "/v1/library", "").await;
+
+    assert_eq!(
+        titles(&content),
+        ["Recently Added", "All Books", "Scifi &amp; Fantasy", "Book of the Month", "Authors"]
+    );
+    assert_eq!(count_links(&content, "/v1/library/shelves/scifi"), 1);
+    assert!(!content.contains("/shelves/chess"), "{}", content);
+
+    // Every entry is a section and none of them is a book: there is no acquisition link among them.
+    assert_eq!(count_items(&content), 5);
+    assert!(!content.contains("opds-spec.org/acquisition"), "{}", content);
 }
 
 // ------- Helper Functions -------

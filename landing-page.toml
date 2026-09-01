@@ -18,7 +18,12 @@
 # Every section needs a `type` which can be one of one of
 # `books`, `new`, `authors`, `tags`, `series` and `publishers`.
 # They will appear in the order as listed here.
-
+#
+# `books` and a `new` sections can (optionally) take `tags_any` or `tags_all` keys that narrow 
+# it to the books carrying those tags. In this case, an `id` is also required. It is used as a slug.
+# 
+# Books can also be rendered "inline": e.g. `show = 8` will render eight books from that section
+# directly o the landing page.
 
 [[section]]
 type = "books"

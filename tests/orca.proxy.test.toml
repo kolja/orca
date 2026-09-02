@@ -1,0 +1,13 @@
+# behind a reverse proxy that sets no X-Forwarded-* headers, links are built from `public_url`
+# The trailing slash is deliberate -- it should not get doubled in an href.
+
+[server]
+ip = "127.0.0.1"
+port = 8888
+protocol = "http"
+public_url = "https://books.example.org/"
+
+# No [authentication] section: the library is served without a login.
+
+[calibre.libraries.library]
+path = "tests/calibre"

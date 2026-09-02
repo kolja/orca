@@ -17,11 +17,11 @@ type = "books"
 show = 12
 tags_any = ["science fiction", "fantasy"]
 
-# One book is a section like any other.
+# `new` rather than `books`, so that a filtered section is shown inline
 [[section]]
 id = "pick"
 title = "Book of the Month"
-type = "books"
+type = "new"
 show = 1
 tags_any = ["horror"]
 

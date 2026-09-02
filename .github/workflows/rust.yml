@@ -32,9 +32,11 @@ jobs:
         run: cargo test --all --release
 
       - name: Test coverage
-        run: cargo tarpaulin --out Xml --output-dir ./coverage
+        if: github.ref == 'refs/heads/main'
+        run: cargo tarpaulin --out Xml --output-dir ./coverage --exclude-files src/main.rs
 
       - name: Coveralls GitHub Action
+        if: github.ref == 'refs/heads/main'
         uses: coverallsapp/github-action@v2.3.4
 
   create-release:

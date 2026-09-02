@@ -35,6 +35,10 @@ static SHELVES_CONFIG: Lazy<Config> =
 static INLINE_CONFIG: Lazy<Config> =
     Lazy::new(|| read_config("tests/orca.inline.test.toml").expect("Failed to read test config"));
 
+/// The same library again, served behind a reverse proxy that sets no X-Forwarded-* headers
+static PROXY_CONFIG: Lazy<Config> =
+    Lazy::new(|| read_config("tests/orca.proxy.test.toml").expect("Failed to read test config"));
+
 // ------- The feeds -------
 
 // One library: the root is a redirect, the same as the OPDS 1.2 root.
@@ -81,6 +85,24 @@ async fn a_library_offers_its_books() {
     // The one section the built-in page shows inline: a group of covers, not a link.
     assert_eq!(group_titles(&library), ["Recently Added"]);
     assert_eq!(publications(&library["groups"][0]).len(), 7); // `show = 12`, seven books
+}
+
+// behind a proxy that sets no X-Forwarded-*, urls are built from `public_url`
+#[test]
+async fn a_public_url_is_the_origin_every_href_is_built_from() {
+    let app = setup(&PROXY_CONFIG).await;
+    let library = feed(&app, "/v2/library").await;
+
+    validates(&library, FEED);
+
+    let hrefs = hrefs(&library);
+    assert!(!hrefs.is_empty(), "a root with no links at all");
+
+    for href in &hrefs {
+        // the configured trailing slash is gone
+        assert!(href.starts_with("https://books.example.org/"), "{}", href);
+        assert!(!href.starts_with("https://books.example.org//"), "{}", href);
+    }
 }
 
 // ------- Browsing by author and by tag -------
@@ -1006,6 +1028,23 @@ fn positions(feed: &Value) -> Vec<f64> {
                 .unwrap_or_default()
         })
         .collect()
+}
+
+fn hrefs(value: &Value) -> Vec<String> {
+    match value {
+        Value::Object(fields) if fields.get("rel").and_then(|rel| rel.as_str()) == Some("alternate") => {
+            Vec::new()
+        }
+        Value::Object(fields) => fields
+            .iter()
+            .flat_map(|(key, value)| match (key.as_str(), value.as_str()) {
+                ("href", Some(href)) => vec![href.to_string()],
+                _ => hrefs(value),
+            })
+            .collect(),
+        Value::Array(items) => items.iter().flat_map(hrefs).collect(),
+        _ => Vec::new(),
+    }
 }
 
 fn collect(links: &Value, key: &str) -> Vec<String> {
